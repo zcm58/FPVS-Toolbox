@@ -37,8 +37,16 @@ def read_project_bids_raw(
 ) -> Any:
     """Prepare a verified BIDS import, then return the shared MNE recording."""
     from Main_App.io.bids_import import prepare_bids_recording, read_bids_recording
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_approvals
 
     import_settings = {**settings, "stim_channel": stim_channel}
+    root = project_import_root(app, settings)
+    if Path(path).suffix.lower() in {".vhdr", ".bvrh"} and STUDIO_SOURCE_APPROVALS_KEY not in import_settings:
+        project = getattr(app, "currentProject", None)
+        manifest = getattr(project, "manifest", None)
+        current_root = getattr(project, "project_root", None)
+        if isinstance(manifest, Mapping) and current_root is not None and Path(current_root) == root:
+            import_settings[STUDIO_SOURCE_APPROVALS_KEY] = studio_source_approvals(manifest)
     temporary = settings.get("enable_bids_import_cache", True) is False
     # Preloaded samples live in RAM or their caller-owned map after this read.
     # Lazy readers keep the import alive through their enclosing reader scope.
@@ -50,12 +58,14 @@ def read_project_bids_raw(
             extra["include"] = list(include)
     with owner as imports:
         descriptor = prepare_bids_recording(
-            path, project_root=project_import_root(app, settings), settings=import_settings,
+            path, project_root=root, settings=import_settings,
             temporary_imports=imports,
         )
         raw = read_bids_recording(
             descriptor, preload=preload, extra_params=extra, stim_channel=stim_channel,
         )
+    if descriptor.studio_source_sha256_by_file is not None:
+        raw._studio_source_sha256_by_file = descriptor.studio_source_sha256_by_file
     raw._fpvs_bids_import = {
         **getattr(raw, "_fpvs_bids_import", {}),
         "dataset_root": str(descriptor.dataset_root),

@@ -21,6 +21,7 @@ _STATUS = {
     "approval_required": "Ask the administrator to approve this lab computer, then connect again.",
     "connection_required": "Connect with the lab code for this study first.",
     "snapshot_parent_conflict": "Another revision or connection conflicts with this upload. Review the dataset on OpenFPVS.",
+    "snapshot_scope_conflict": "The pending upload and the current study destination differ. Review the project's study connection.",
     "delivery_unavailable": "OpenFPVS is unavailable. Your local files are preserved.",
     "capacity_or_rate_limit": "OpenFPVS reached a capacity or request limit. Retry later.",
     "authorization_required": "OpenFPVS access was rejected. Review the lab connection.",
@@ -50,7 +51,7 @@ class ResultsSharingDialog(AppDialog):
     def __init__(self, project, scope, parent):
         super().__init__("Share study results", parent)
         self.setMinimumWidth(460)
-        self.project_root, self.scope = Path(project.project_root), scope
+        self.project_root, self.scope = Path(project.project_root), dict(scope)
         self.thread = None
         project_name = SubsectionHeaderLabel(project.name, self)
         project_name.setTextFormat(Qt.PlainText)
@@ -80,8 +81,10 @@ class ResultsSharingDialog(AppDialog):
         self.publish_button = make_action_button("Share current results", variant="primary", parent=self)
         self.retry_button = make_action_button("Retry pending upload", parent=self)
         self.connect_button.clicked.connect(self._connect)
-        self.publish_button.clicked.connect(lambda: self._start(partial(publish_current, self.project_root)))
-        self.retry_button.clicked.connect(lambda: self._start(partial(deliver_pending, self.project_root, retry=True)))
+        self.publish_button.clicked.connect(lambda: self._start(
+            partial(publish_current, self.project_root, expected_scope=dict(self.scope))))
+        self.retry_button.clicked.connect(lambda: self._start(
+            partial(deliver_pending, self.project_root, expected_scope=dict(self.scope), retry=True)))
         self.status = QLabel("", self)
         self.status.setTextFormat(Qt.PlainText)
         self.status.setWordWrap(True)

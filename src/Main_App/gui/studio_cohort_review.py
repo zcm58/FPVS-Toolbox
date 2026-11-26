@@ -45,6 +45,8 @@ class StudioCohortReview(AppDialog):
             counts_text.append(f"{len(review.omitted)} omitted")
         if extras:
             counts_text.append(f"Extra EEG files: {len(extras)}")
+        if review.unreadable:
+            counts_text.append(f"Unreadable recordings: {len(review.unreadable)}")
         if review.prior:
             new = {r.visit["participant_number"] for r in review.rows if r.change == "new participant"}
             additional = sum(r.change == "additional visit" for r in review.rows)
@@ -148,6 +150,10 @@ class StudioCohortReview(AppDialog):
             index = self._row("", "", "", "Extra file")
             self.table.setItem(index, 4, QTableWidgetItem(name))
             self.full_only.append(index)
+        for name, problem in review.unreadable.items():
+            index = self._row("", "", "", "Unreadable recording")
+            self.table.setItem(index, 4, QTableWidgetItem(name))
+            self.details[index] = problem
         self.full.toggled.connect(self._show_full)
         self.full.setChecked(first_exception is None)
         self.full.setVisible(bool(self.full_only and first_exception is not None))
@@ -180,23 +186,25 @@ class StudioCohortReview(AppDialog):
         prior_results = [r for r in review.prior.get("history", ()) if r.get("previous_result")]
         if project_root and prior_results:
             history = QComboBox(self)
-            for item in reversed(prior_results):
+            prior_results.reverse()
+            for item in prior_results:
                 pids = {r["participant_number"] for r in item["visits"].values() if r["decision"] == "matched"
                         and version_key(r) in item["versions"]}
-                history.addItem(f"Previous cohort · {len(pids)} participants · roster {item['roster_sequence']}",
-                                item["previous_result"])
+                history.addItem(f"Previous cohort · {len(pids)} participants · roster {item['roster_sequence']}")
             open_result = make_action_button("Open previous Excel result", parent=self)
             def open_previous():
                 from Main_App.gui.open_paths import open_path_in_file_manager
-                target = (Path(project_root) / history.currentData()).resolve()
-                archives = (Path(project_root) / ".fpvs_imports/studio/prior-results").resolve()
-                if not target.is_relative_to(archives) or not target.is_file():
-                    self.feedback.setText("The archived result is unavailable.")
-                    return
+                from Main_App.projects.project_manager import _run_source_registration_work
+                from Main_App.projects.studio_archive import verified_archived_workbook
+                receipt = prior_results[history.currentIndex()]
                 try:
+                    target = _run_source_registration_work(
+                        self, lambda: verified_archived_workbook(Path(project_root), receipt),
+                        "Checking the archived workbook…",
+                    )
                     if not open_path_in_file_manager(target):
                         raise OSError("No application opened the workbook.")
-                except OSError as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     self.feedback.setText(f"Could not open the archived workbook. {exc}")
             open_result.clicked.connect(open_previous)
             self.root_layout.addWidget(make_action_row((history, open_result), parent=self))
@@ -244,6 +252,9 @@ class StudioCohortReview(AppDialog):
             self.feedback.setText("Choose a recording inside the reviewed EEG folder.")
             return
         name = path.relative_to(self.review.folder).as_posix()
+        if name in self.review.unreadable:
+            self.feedback.setText(self.review.unreadable[name])
+            return
         if name not in self.review.files:
             self.feedback.setText("The EEG inventory changed. Reopen review before matching this recording.")
             return
@@ -322,13 +333,25 @@ def review_imported_study(host, parent, projects_root, imported, existing=None):
     from Main_App.projects.project_manager import _run_source_registration_work
 
     study_id = imported.provenance["study_id"]
+    unreadable = []
     if existing is None:
         active = getattr(host, "currentProject", None)
         if active and active.manifest.get("tools", {}).get(NAMESPACE, {}).get("study_id") == study_id:
             existing = active
         else:
-            existing = _run_source_registration_work(parent, lambda: find_study_project(projects_root, study_id),
-                                                     "Finding the study project…")
+            existing = _run_source_registration_work(
+                parent, lambda: find_study_project(projects_root, study_id, warnings=unreadable),
+                "Finding the study project…",
+            )
+            for warning in unreadable:
+                host.log(warning)
+            if unreadable and existing is None:
+                detail = "\n".join(unreadable)
+                if QMessageBox.question(parent, "Create a new study project?",
+                                        f"{detail}\n\nOne of these projects may already contain this study. "
+                                        "Create a new project anyway?", QMessageBox.Yes | QMessageBox.No,
+                                        QMessageBox.No) != QMessageBox.Yes:
+                    return None
     if existing:
         from Main_App.projects.project import Project
         root = existing.project_root
@@ -378,7 +401,7 @@ def review_imported_study(host, parent, projects_root, imported, existing=None):
             project = _run_source_registration_work(parent, lambda: commit_study_review(
                 projects_root, imported, review, decisions=decisions, omissions=omissions,
                 versions=versions, warnings=warnings, hardware=platform, existing=existing,
-                group_assignments=assignments,
+                group_assignments=assignments, accepted_unreadable=unreadable,
             ), "Saving the reviewed study…")
         except (OSError, RuntimeError, ValueError) as exc:
             dialog.feedback.setText(str(exc))
@@ -397,6 +420,7 @@ def reopen_study_review(host):
     from Main_App.gui.project_drafts import confirm_project_draft_exit
     from Main_App.projects.fpvs_config_import import _import_setup, with_study_roster
     from Main_App.projects.studio_cohort import validate_study_handoff
+    from Main_App.projects.studio_archive import studio_evidence_path
     from Main_App.projects.project_manager import _run_source_registration_work
 
     project = getattr(host, "currentProject", None)
@@ -406,7 +430,7 @@ def reopen_study_review(host):
     def read_saved():
         current = json.loads((project.project_root / "project.json").read_bytes())
         state = current["tools"][NAMESPACE]
-        path = project.project_root / ".fpvs_imports" / "studio" / (state["source_sha256"] + ".json")
+        path = studio_evidence_path(project.project_root, state["source_sha256"])
         saved = json.loads(path.read_text(encoding="utf-8"))
         setup, study = validate_study_handoff(saved["handoff"])
         if (study["study_id"], study["roster_revision"]) != (state["study_id"], state["roster_revision"]):

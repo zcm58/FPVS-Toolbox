@@ -6,6 +6,7 @@ It performs no FFT, magnitude, inverse, harmonic, or source-space calculation.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -14,6 +15,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import tempfile
 import time
 from typing import Any, Mapping, Sequence
@@ -24,6 +26,7 @@ import numpy as np
 from Main_App.io.geometry_metadata import validate_source_geometry_identity
 from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.acquisition_metadata import resolve_recording_contract
+from Main_App.projects.manifest_store import project_manifest_transaction
 from Main_App.processing.pipeline_plan import (
     PIPELINE_SETTINGS_KEY,
     PipelineConfigurationError,
@@ -106,6 +109,7 @@ def write_source_ready_time_domain_derivatives(
     source_signature: Mapping[str, Any] | None = None,
     resolved_protocol_by_condition: Mapping[str, Mapping[str, Any] | None] | None = None,
     merge_existing: bool = False,
+    required_condition_labels: Sequence[str] = (),
     pipeline_settings: Mapping[str, Any] | None = None,
 ) -> SourceReadyTimeDomainExportResult:
     """Write all source-ready conditions for one participant and commit last.
@@ -168,44 +172,43 @@ def write_source_ready_time_domain_derivatives(
     processing = _json_value(processing_values)
     geometry = _validated_processing_geometry(processing)
     signature = _json_value(dict(source_signature or {})) if source_signature is not None else None
-    written_paths: list[Path] = []
     artifacts: list[SourceReadyTimeDomainArtifact] = []
-    if merge_existing and manifest_path.is_file():
-        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
-        for key, expected in (
-            ("participant_id", participant), ("group_id", normalized_group_id),
-            ("recording_id", normalized_recording_id), ("session_id", normalized_session_id),
-            ("geometry", geometry), ("complete", True),
-        ):
-            if previous.get(key) != expected:
-                raise ValueError(f"Cannot merge source derivatives with changed {key}.")
-        replacing = {plan.condition_label for plan in plans}
-        for item in previous.get("artifacts", []):
-            if item["condition_label"] in replacing:
-                continue
-            fif_path = _project_path(root, item["fif_path"])
-            sidecar_path = _project_path(root, item["sidecar_path"])
-            if (_sha256_file(fif_path) != item["fif_sha256"]
-                    or _sha256_file(sidecar_path) != item["sidecar_sha256"]):
-                raise ValueError("An unchanged source derivative is missing or stale.")
-            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            if sidecar.get("source_signature") != signature:
-                raise ValueError("Cannot preserve source derivatives from a changed recording.")
-            prior_processing = sidecar.get("processing", {}).get("provenance", {})
-            if not isinstance(prior_processing, Mapping) or pipeline_fingerprint_payload(prior_processing) != pipeline_identity:
-                raise PipelineConfigurationError(
-                    "Cannot preserve source derivatives produced by different pipeline methods."
-                )
-            artifacts.append(SourceReadyTimeDomainArtifact(
-                condition_id=item["condition_id"], condition_label=item["condition_label"],
-                fif_path=fif_path, sidecar_path=sidecar_path,
-                fif_sha256=item["fif_sha256"], sidecar_sha256=item["sidecar_sha256"],
-            ))
-    committed = False
-
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.unlink(missing_ok=True)
-    try:
+    with _source_publication(manifest_path, merge_existing) as write_file:
+        if merge_existing:
+            previous = _read_merge_base(manifest_path)
+            for key, expected in (
+                ("participant_id", participant), ("group_id", normalized_group_id),
+                ("recording_id", normalized_recording_id), ("session_id", normalized_session_id),
+                ("geometry", geometry), ("group_folder", normalized_group_folder),
+                ("schema_version", 2 if normalized_recording_id else 1),
+            ):
+                if previous.get(key) != expected:
+                    raise ValueError(f"Cannot merge source derivatives with changed {key}.")
+            replacing = {plan.condition_label for plan in plans}
+            inventory = {item["condition_label"] for item in previous["artifacts"]}
+            if set(required_condition_labels).difference(inventory | replacing):
+                raise ValueError("The source manifest is missing an available condition. Regenerate all conditions.")
+            for item in previous["artifacts"]:
+                if item["condition_label"] in replacing:
+                    continue
+                fif_path = _project_path(root, item["fif_path"])
+                sidecar_path = _project_path(root, item["sidecar_path"])
+                if (_sha256_file(fif_path) != item["fif_sha256"]
+                        or _sha256_file(sidecar_path) != item["sidecar_sha256"]):
+                    raise ValueError("An unchanged source derivative is missing or stale.")
+                sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                if sidecar.get("source_signature") != signature:
+                    raise ValueError("Cannot preserve source derivatives from a changed recording.")
+                prior_processing = sidecar.get("processing", {}).get("provenance", {})
+                if not isinstance(prior_processing, Mapping) or pipeline_fingerprint_payload(prior_processing) != pipeline_identity:
+                    raise PipelineConfigurationError(
+                        "Cannot preserve source derivatives produced by different pipeline methods."
+                    )
+                artifacts.append(SourceReadyTimeDomainArtifact(
+                    condition_id=item["condition_id"], condition_label=item["condition_label"],
+                    fif_path=fif_path, sidecar_path=sidecar_path,
+                    fif_sha256=item["fif_sha256"], sidecar_sha256=item["sidecar_sha256"],
+                ))
         for plan in plans:
             plan.fif_path.parent.mkdir(parents=True, exist_ok=True)
             average_raw, repetition_count = _averaged_eeg_raw(
@@ -219,9 +222,8 @@ def write_source_ready_time_domain_derivatives(
                 sfreq_hz=float(average_raw.info["sfreq"]),
             )
             protocol = _resolved_protocol(protocol_lookup.get(plan.condition_label))
-            _atomic_write_raw_fif(plan.fif_path, average_raw)
-            written_paths.append(plan.fif_path)
-            fif_sha256 = _sha256_file(plan.fif_path)
+            fif_output = write_file(plan.fif_path, _atomic_write_raw_fif, average_raw)
+            fif_sha256 = _sha256_file(fif_output)
 
             sidecar = _sidecar_payload(
                 root=root,
@@ -240,9 +242,8 @@ def write_source_ready_time_domain_derivatives(
                 source_signature=signature,
                 resolved_protocol=protocol,
             )
-            _atomic_write_json(plan.sidecar_path, sidecar)
-            written_paths.append(plan.sidecar_path)
-            sidecar_sha256 = _sha256_file(plan.sidecar_path)
+            sidecar_output = write_file(plan.sidecar_path, _atomic_write_json, sidecar)
+            sidecar_sha256 = _sha256_file(sidecar_output)
             artifacts.append(
                 SourceReadyTimeDomainArtifact(
                     condition_id=plan.condition_id,
@@ -280,16 +281,7 @@ def write_source_ready_time_domain_derivatives(
         if normalized_recording_id:
             manifest["recording_id"] = normalized_recording_id
             manifest["session_id"] = normalized_session_id
-        _atomic_write_json(manifest_path, manifest)
-        committed = True
-    finally:
-        if not committed:
-            manifest_path.unlink(missing_ok=True)
-            for path in reversed(written_paths):
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    logger.warning("source_time_domain_partial_cleanup_failed path=%s", path)
+        write_file(manifest_path, _atomic_write_json, manifest)
 
     logger.info(
         "source_ready_time_domain_exported participant=%s group=%s conditions=%d manifest=%s",
@@ -308,6 +300,97 @@ def write_source_ready_time_domain_derivatives(
         recording_id=normalized_recording_id,
         session_id=normalized_session_id,
     )
+
+
+def _read_merge_base(path: Path) -> dict:
+    previous = json.loads(path.read_text(encoding="utf-8"))
+    entries = previous.get("artifacts") if isinstance(previous, dict) else None
+    if (
+        not isinstance(entries, list) or not entries
+        or previous.get("format") != SOURCE_READY_TIME_DOMAIN_PARTICIPANT_MANIFEST_FORMAT
+        or previous.get("complete") is not True
+        or type(previous.get("artifact_count")) is not int
+        or previous["artifact_count"] != len(entries)
+        or any(
+            not isinstance(item, dict) or item.get("complete") is not True
+            or not isinstance(item.get("condition_id"), str) or not item["condition_id"]
+            or not isinstance(item.get("condition_label"), str) or not item["condition_label"]
+            for item in entries
+        )
+        or len({item["condition_id"].casefold() for item in entries}) != len(entries)
+        or len({item["condition_label"].casefold() for item in entries}) != len(entries)
+    ):
+        raise ValueError("Focused repair requires a complete source manifest. Regenerate all conditions.")
+    return previous
+
+
+@contextmanager
+def _source_publication(manifest: Path, merge_existing: bool):
+    """Serialize one participant's writes and publish its manifest last."""
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    with project_manifest_transaction(manifest):
+        if not merge_existing:
+            # A full regeneration already has every available condition. Keep
+            # its established single-file writes and fail-closed publication.
+            manifest.unlink(missing_ok=True)
+            destinations = []
+
+            def full_write(path: Path, writer, value) -> Path:
+                writer(path, value)
+                destinations.append(path)
+                return path
+
+            try:
+                yield full_write
+            except BaseException:
+                for path in reversed(destinations):
+                    path.unlink(missing_ok=True)
+                raise
+            return
+
+        if not manifest.is_file():
+            raise ValueError("Focused repair requires a complete source manifest. Regenerate all conditions.")
+        # All existing public paths stay readable while generating and hashing
+        # the replacement. Only same-volume renames are needed at publication.
+        staging = Path(tempfile.mkdtemp(prefix=".source-", dir=manifest.parent))
+        replacements = {}
+        rollback = []
+        keep_backups = False
+
+        def staged_write(path: Path, writer, value) -> Path:
+            # Source discovery recursively scans manifests for *.json.
+            staged = staging / f"{len(replacements)}.stage"
+            writer(staged, value)
+            replacements[path] = staged
+            return staged
+
+        try:
+            yield staged_write
+            declaration = replacements.pop(manifest)
+            for index, (target, candidate) in enumerate(replacements.items()):
+                backup = None
+                if target.exists():
+                    backup = staging / f"{index}.previous"
+                    _replace_file(target, backup)
+                rollback.append((target, backup))
+                _replace_file(candidate, target)
+            _replace_file(declaration, manifest)
+        except BaseException:
+            # Restore overwritten pairs if publishing a later member or the
+            # final declaration failed. Keep backups if storage itself fails.
+            for target, backup in reversed(rollback):
+                try:
+                    if backup is None:
+                        target.unlink(missing_ok=True)
+                    else:
+                        _replace_file(backup, target)
+                except OSError:
+                    keep_backups = True
+                    logger.exception("source_derivative_rollback_failed path=%s backup=%s", target, backup)
+            raise
+        finally:
+            if not keep_backups:
+                shutil.rmtree(staging, ignore_errors=True)
 
 
 def _active_project_root(project_root: str | Path) -> Path:
@@ -666,20 +749,20 @@ def _sha256_file(path: Path) -> str:
 
 
 def _project_path(root: Path, *parts: str) -> Path:
-    canonical_root = _canonical_resolved_path(root)
-    target = _canonical_resolved_path(canonical_root.joinpath(*parts))
+    # Callers pass the canonical root returned by _active_project_root or
+    # this function. Compare each live target against that fixed boundary.
+    target = _canonical_resolved_path(root.joinpath(*parts))
     try:
-        target.relative_to(canonical_root)
+        target.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"Refusing source-ready output outside the project root: {target}") from exc
     return target
 
 
 def _relative_project_path(root: Path, path: Path) -> str:
-    canonical_root = _canonical_resolved_path(root)
     resolved = _canonical_resolved_path(path)
     try:
-        return resolved.relative_to(canonical_root).as_posix()
+        return resolved.relative_to(root).as_posix()
     except ValueError as exc:
         raise ValueError(f"Refusing source-ready output outside the project root: {resolved}") from exc
 
@@ -696,7 +779,7 @@ def source_ready_project_relative_path(
     not create false outside-project failures.
     """
 
-    return _relative_project_path(Path(project_root), Path(path))
+    return _relative_project_path(_canonical_resolved_path(project_root), Path(path))
 
 
 def _canonical_resolved_path(path: str | Path) -> Path:

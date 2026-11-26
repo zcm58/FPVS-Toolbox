@@ -120,6 +120,26 @@ def test_other_participant_choices_keep_p1_full_cache_and_source_events(scan_fix
     _assert_same_evidence(first, second)
 
 
+def test_reapproved_studio_source_bytes_invalidate_event_signal_and_occurrence_caches(scan_fixture, monkeypatch):
+    scan, reads, event_reads, paths, _events = scan_fixture
+    open_raw = qc.load_utils.open_preflight_eeg_file
+    source_hashes = {str(paths[0].with_suffix(ext)): "a" * 64 for ext in (".vhdr", ".eeg", ".vmrk")}
+
+    @contextmanager
+    def admitted(*args, **kwargs):
+        with open_raw(*args, **kwargs) as raw:
+            raw._studio_source_sha256_by_file = source_hashes.copy()
+            yield raw
+
+    monkeypatch.setattr(qc.load_utils, "open_preflight_eeg_file", admitted)
+    scan()
+    assert scan().results[0].condition_qc["cache_status"] == "hit"
+    source_hashes[str(paths[0].with_suffix(".eeg"))] = "b" * 64
+    refreshed = scan().results[0]
+    assert len(event_reads) == 2 and len(reads) == 4
+    assert refreshed.condition_qc["occurrence_cache_hits"] == 0
+
+
 def test_excluding_one_condition_reuses_other_occurrence_and_matches_cold(scan_fixture, tmp_path):
     scan, reads, event_reads, _paths, _events = scan_fixture
     scan()

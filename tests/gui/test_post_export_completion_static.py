@@ -58,7 +58,8 @@ def _host(output_root):
 def test_output_snapshot_counts_anchors_and_ignores_companions_and_temporary_files(tmp_path):
     accepted = ["P01.fpvs", "P02.FPVS", "P03.xlsx", "P04.XLSX", "P05.xlsm"]
     ignored = ["._P06.fpvs", "~$P07.fpvs", "._P08.xlsx", "~$P09.xlsx",
-               "P10.spectra.npz", "P10.metrics.npz", ".P10.tmp", "P11.fpvs.tmp"]
+               "P10.spectra.npz", "P10.metrics.npz", ".P10.tmp", "P11.fpvs.tmp",
+               ".P12_random.abc123.tmp.xlsx", ".P13_random.abc123.TMP.XLSX"]
     nested = tmp_path / "Condition"
     nested.mkdir()
     for name in accepted + ignored:
@@ -110,9 +111,10 @@ def test_completed_export_skips_rescan_but_unconfirmed_run_still_observes_io_err
     assert host._last_job_success is False
 
 
-def test_orphan_companions_do_not_mask_a_run_with_no_outputs(tmp_path, workflows):
+@pytest.mark.parametrize("unfinished", ["P01.spectra.npz", ".P01_random.abc123.tmp.xlsx"])
+def test_unfinished_files_do_not_mask_a_run_with_no_outputs(tmp_path, workflows, unfinished):
     host = _host(tmp_path)
-    (tmp_path / "P01.spectra.npz").write_bytes(b"incomplete export")
+    (tmp_path / unfinished).write_bytes(b"incomplete export")
     workflows.refresh_run_excel_success_from_disk(host)
     assert host._last_job_success is False
     assert workflows.should_show_no_excel_popup([], tmp_path) is True

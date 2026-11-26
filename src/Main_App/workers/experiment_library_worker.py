@@ -39,8 +39,8 @@ class ExperimentCatalogWorker(QObject):
         try:
             notices = []
             try:
-                local = list_installed_datasets(self.projects_root)
-            except LibraryError as exc:
+                local = list_installed_datasets(self.projects_root, on_notice=notices.append)
+            except (LibraryError, OSError) as exc:
                 local = ()
                 notices.append(f"Installed project needs attention. {exc}")
             try:
@@ -57,7 +57,7 @@ class ExperimentCatalogWorker(QObject):
             for item in items:
                 try:
                     path = installed_dataset_path(item, self.projects_root)
-                except LibraryError as exc:
+                except (LibraryError, OSError) as exc:
                     notices.append(f"{item.title} could not be reopened. {exc}")
                     continue
                 if path is not None:

@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tempfile
 from time import perf_counter
 import traceback
@@ -30,7 +31,8 @@ import mne
 import numpy as np
 
 from Main_App.io.atomic_write import rename_with_retry
-from Main_App.io.recording_sources import recording_source_files
+from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+from Main_App.io.safe_file import regular_file_info
 
 logger = logging.getLogger(__name__)
 IMPORT_VERSION = "bids_import_v1"
@@ -53,6 +55,7 @@ class BidsRecording:
     reused: bool
     representation: str
     import_key: str = ""
+    studio_source_sha256_by_file: dict[str, str] | None = None
 
     @property
     def header_path(self) -> Path:
@@ -66,22 +69,6 @@ def _json(path: Path, value: Any) -> None:
 def _digest(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def _source_identity(source: Path) -> tuple[dict, ...]:
-    rows = []
-    for path in recording_source_files(source):
-        path = path.resolve(strict=True)
-        before = path.stat()
-        digest = _digest(path)
-        after = path.stat()
-        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_size, after.st_mtime_ns, after.st_ctime_ns
-        ):
-            raise OSError("Recording changed while its import identity was calculated.")
-        rows.append({"path": str(path), "size": after.st_size, "mtime_ns": after.st_mtime_ns,
-                     "ctime_ns": after.st_ctime_ns, "sha256": digest})
-    return tuple(rows)
 
 
 def _contained(path: Path, root: Path) -> Path:
@@ -111,9 +98,9 @@ def _tsv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def _copy_brainvision(source: Path, target: Path) -> None:
+def _copy_brainvision(identity: tuple[dict, ...], target: Path) -> None:
     """Repair declared links without assuming companions share a basename."""
-    header, data, markers = recording_source_files(source)
+    header, data, markers = (Path(row["path"]) for row in identity)
     shutil.copyfile(data, target.with_suffix(".eeg"))
     for original, destination in ((header, target), (markers, target.with_suffix(".vmrk"))):
         payload = original.read_bytes()
@@ -257,11 +244,67 @@ def _restore_import_events(raw: Any, metadata: Mapping, *, import_key: str) -> n
     return canonical_recording_events(raw)
 
 
-def _valid_publication(folder: Path, identity: tuple[dict, ...], key: str) -> dict | None:
+def _publication_layout(source: Path, key: str) -> tuple[str, str, str, Path]:
+    subject = "fpvs" + key[:16]
+    if source.suffix.lower() == ".bvrh":
+        return subject, "bvrf_fif64_derivative", ".fif", Path("dataset/derivatives/fpvs-import")
+    return subject, "raw_eeg_bids", source.suffix.lower(), Path("dataset")
+
+
+def _required_output_paths(
+    identity: tuple[dict, ...], layout: tuple[str, str, str, Path], *, mobile: bool,
+) -> set[str]:
+    subject, _, extension, raw_root = layout
+    stem = f"sub-{subject}_task-fpvs"
+    eeg = raw_root / f"sub-{subject}" / "eeg"
+    paths = {Path("dataset/dataset_description.json"), raw_root / "dataset_description.json",
+             raw_root / "participants.tsv", eeg / f"{stem}_eeg{extension}"}
+    paths.update(eeg / f"{stem}_{name}" for name in ("eeg.json", "channels.tsv", "events.tsv", "events.json"))
+    if extension == ".vhdr":
+        paths.update(eeg / f"{stem}_eeg{ext}" for ext in (".eeg", ".vmrk"))
+    if mobile or extension == ".fif":
+        paths.update(Path("dataset/sourcedata") / subject / Path(row["path"]).name for row in identity)
+    return {path.as_posix() for path in paths}
+
+
+def _verified_outputs(folder: Path, rows: list, required: set[str]) -> bool:
+    """Match the receipt to every physical member, including optional FIF splits."""
+    if not isinstance(rows, list):
+        return False
+    remaining = {row["path"]: row for row in rows}
+    if len(remaining) != len(rows) or not required.issubset(remaining):
+        return False
+    directories = [folder]
+    while directories:
+        with os.scandir(directories.pop()) as entries:
+            for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    return False
+                path = Path(entry.path)
+                if stat.S_ISDIR(info.st_mode):
+                    directories.append(path)
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    return False
+                name = path.relative_to(folder).as_posix()
+                if name == "import.json":
+                    continue
+                row = remaining.pop(name, None)
+                if row is None or info.st_size != row["size"] or _digest(path) != row["sha256"]:
+                    return False
+    return not remaining
+
+
+def _valid_publication(folder: Path, identity: tuple[dict, ...], key: str, *, mobile: bool = False) -> dict | None:
     try:
-        manifest = json.loads((folder / "import.json").read_text(encoding="utf-8"))
+        receipt = folder / "import.json"
+        if regular_file_info(receipt) is None:
+            return None
+        manifest = json.loads(receipt.read_text(encoding="utf-8"))
         if (manifest["version"] != IMPORT_VERSION or manifest["key"] != key
                 or manifest["source_identity"] != list(identity)
+                or not isinstance(manifest["recording"], dict)
                 or not {"subject_info", "digitization", "bvrf_header", "bvrf_marker_rows"}.issubset(manifest["recording"])):
             return None
         metadata = manifest["recording"]
@@ -271,16 +314,20 @@ def _valid_publication(folder: Path, identity: tuple[dict, ...], key: str) -> di
                 first_samp=metadata["canonical_events_first_samp"],
             )
             _restore_import_events(probe, metadata, import_key=key)
-        for row in manifest["outputs"]:
-            path = _contained(folder / row["path"], folder.resolve())
-            if not path.is_file() or path.stat().st_size != row["size"] or _digest(path) != row["sha256"]:
-                return None
+        if not identity:
+            return None
+        layout = _publication_layout(Path(identity[0]["path"]), key)
+        if (manifest["subject"], manifest["representation"], manifest["extension"]) != layout[:3]:
+            return None
+        if not _verified_outputs(folder, manifest["outputs"], _required_output_paths(identity, layout, mobile=mobile)):
+            return None
         return manifest
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
-def _descriptor(folder: Path, manifest: dict, *, conversion_seconds: float, identity_seconds: float, reused: bool) -> BidsRecording:
+def _descriptor(folder: Path, manifest: dict, *, conversion_seconds: float, identity_seconds: float,
+                reused: bool, studio_source_hashes: dict[str, str] | None = None) -> BidsRecording:
     from mne_bids import BIDSPath
 
     root = folder / "dataset"
@@ -289,7 +336,8 @@ def _descriptor(folder: Path, manifest: dict, *, conversion_seconds: float, iden
     bids_path = BIDSPath(root=root, subject=manifest["subject"], task="fpvs", datatype="eeg",
                          suffix="eeg", extension=manifest["extension"], check=manifest["extension"] != ".fif")
     return BidsRecording(bids_path, root, folder / "import.json", tuple(manifest["source_identity"]),
-                         conversion_seconds, identity_seconds, reused, manifest["representation"], manifest["key"])
+                         conversion_seconds, identity_seconds, reused, manifest["representation"], manifest["key"],
+                         studio_source_hashes)
 
 
 def prepare_bids_recording(
@@ -309,7 +357,10 @@ def prepare_bids_recording(
     from Main_App.projects.hardware import require_hardware_ready
 
     started = perf_counter()
-    source = Path(source).resolve(strict=True)
+    selected = Path(source)
+    source = selected.resolve(strict=True)
+    if selected.suffix.lower() in {".vhdr", ".bvrh"} and not source.is_relative_to(selected.parent.resolve()):
+        raise ValueError("Brain Products files must remain inside the recording folder.")
     settings = dict(settings or {})
     hardware = require_hardware_ready(settings, paths=(source,))
     if source.suffix.lower() not in {".bdf", ".vhdr", ".bvrh"}:
@@ -332,7 +383,21 @@ def prepare_bids_recording(
             tempfile.TemporaryDirectory(prefix="bids-", dir=publication_root),
         )
         cache = _contained(Path(temporary), publication_root)
-    identity = _source_identity(source)
+    identity = recording_content_identity(source)
+    studio_source_hashes = None
+    if source.suffix.lower() in {".vhdr", ".bvrh"}:
+        from Main_App.projects.studio_recording_identity import (
+            STUDIO_SOURCE_APPROVALS_KEY, read_project_studio_source_approvals, studio_source_approval,
+        )
+
+        approvals = settings.get(STUDIO_SOURCE_APPROVALS_KEY)
+        if approvals is None:
+            approvals = read_project_studio_source_approvals(root)
+        approved = studio_source_approval(approvals, selected)
+        if approved is not None:
+            studio_source_hashes = source_hashes_by_file(identity)
+            if studio_source_hashes != approved:
+                raise ValueError("The recording differs from its Studio approval. Review the cohort again.")
     key_payload = {"version": IMPORT_VERSION, "sources": identity,
                    "settings": {name: settings[name] for name in _SETTING_KEYS if name in settings},
                    "mne": mne.__version__, "mne_bids": mne_bids.__version__}
@@ -340,25 +405,22 @@ def prepare_bids_recording(
     if retain:
         for existing in sorted(cache.glob(f"{key[:24]}-*")):
             _contained(existing, root)
-            manifest = _valid_publication(existing, identity, key)
+            manifest = _valid_publication(existing, identity, key, mobile=hardware == "unicorn")
             if manifest is not None:
                 return _descriptor(existing, manifest, conversion_seconds=0.0,
-                                   identity_seconds=perf_counter() - started, reused=True)
+                                   identity_seconds=perf_counter() - started, reused=True, studio_source_hashes=studio_source_hashes)
     identity_seconds = perf_counter() - started
     conversion_started = perf_counter()
-    subject = "fpvs" + key[:16]
     suffix = source.suffix.lower()
-    representation = "bvrf_fif64_derivative" if suffix == ".bvrh" else "raw_eeg_bids"
-    extension = ".fif" if suffix == ".bvrh" else suffix
+    subject, representation, extension, relative_root = _publication_layout(source, key)
     final = _contained(cache / f"{key[:24]}-{uuid.uuid4().hex[:8]}", publication_root)
     with tempfile.TemporaryDirectory(prefix=".import-", dir=cache) as temporary:
         staging = Path(temporary)
         dataset = staging / "dataset"
         dataset.mkdir()
         _json(dataset / "dataset_description.json", {"Name": "FPVS Toolbox recording import", "BIDSVersion": "1.9.0", "DatasetType": "raw"})
-        raw_root = dataset
+        raw_root = staging / relative_root
         if suffix == ".bvrh":
-            raw_root = dataset / "derivatives" / "fpvs-import"
             raw_root.mkdir(parents=True)
             _json(raw_root / "dataset_description.json", {
                 "Name": "FPVS lossless BVRF import", "BIDSVersion": "1.9.0", "DatasetType": "derivative",
@@ -382,7 +444,10 @@ def prepare_bids_recording(
                 owners.callback(raw.close)
             else:
                 from Main_App.io.brain_products import read_brain_products_raw
-                raw = read_brain_products_raw(source, preload=False, synthesize_status=False)
+                if suffix == ".vhdr":
+                    _copy_brainvision(identity, target)
+                raw = read_brain_products_raw(target if suffix == ".vhdr" else source,
+                                              preload=False, synthesize_status=False)
                 owners.callback(raw.close)
             metadata = _metadata(raw, target, settings, source=source, import_key=key)
             if suffix == ".bdf":
@@ -395,13 +460,11 @@ def prepare_bids_recording(
                     shutil.copyfile(source, original / source.name)
                 else:
                     shutil.copyfile(source, target)
-            elif suffix == ".vhdr":
-                _copy_brainvision(source, target)
-            else:
+            elif suffix == ".bvrh":
                 raw.save(target, fmt="double", overwrite=False, verbose=False)
             _tsv(raw_root / "participants.tsv", ("participant_id",), [{"participant_id": f"sub-{subject}"}])
         verification_started = perf_counter()
-        if _source_identity(source) != identity:
+        if recording_content_identity(source) != identity:
             raise OSError("Source recording changed during BIDS import; no cache was published.")
         outputs = [{"path": str(file.relative_to(staging).as_posix()), "size": file.stat().st_size, "sha256": _digest(file)}
                    for file in sorted(staging.rglob("*")) if file.is_file()]
@@ -415,7 +478,8 @@ def prepare_bids_recording(
     identity_seconds += verification_seconds
     logger.info("BIDS import published source=%s representation=%s conversion_seconds=%.6f identity_seconds=%.6f",
                 source.name, representation, elapsed, identity_seconds)
-    return _descriptor(final, manifest, conversion_seconds=elapsed, identity_seconds=identity_seconds, reused=False)
+    return _descriptor(final, manifest, conversion_seconds=elapsed, identity_seconds=identity_seconds,
+                       reused=False, studio_source_hashes=studio_source_hashes)
 
 
 def read_bids_recording(recording: BidsRecording, *, preload: bool | str = False,
@@ -449,6 +513,11 @@ def read_bids_recording(recording: BidsRecording, *, preload: bool | str = False
         params["preload"] = False
         if source_suffix != ".bdf":
             params.pop("stim_channel", None)
+            from Main_App.io.brain_products_files import source_files
+
+            header = recording.header_path
+            if source_files(header, native_paths=True) != (header, header.with_suffix(".eeg"), header.with_suffix(".vmrk")):
+                raise ValueError("Imported BrainVision companions differ from the verified BIDS inventory.")
         elif "mobile_import" in metadata or "canonical_events" in metadata:
             params["stim_channel"] = [name for name, kind in zip(metadata["channel_names"], metadata["channel_types"], strict=True) if kind == "stim"] or None
         raw = read_raw_bids(recording.bids_path, extra_params=params, verbose=False)

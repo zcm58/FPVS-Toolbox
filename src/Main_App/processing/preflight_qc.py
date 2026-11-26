@@ -1845,7 +1845,7 @@ def _scan_one_preflight_file_v2(
             raise RuntimeError("The BDF changed during Status-based memory admission; run preflight QC again.")
 
     _require_current_status_bound()
-    file_identity = _preflight_file_identity(file_path, recording_id=recording_id)
+    source_stat_identity = _preflight_file_identity(file_path, recording_id=recording_id)
     cache_settings = _preflight_cache_settings(
         file_qc_settings, participant_id=participant_id, recording_id=recording_id,
         condition_labels=tuple(str(label) for label in event_map),
@@ -1853,7 +1853,7 @@ def _scan_one_preflight_file_v2(
     cache_method = _preflight_cache_method(file_qc_settings)
 
     def _require_unchanged_source() -> None:
-        if _preflight_file_identity(file_path, recording_id=recording_id) != file_identity:
+        if _preflight_file_identity(file_path, recording_id=recording_id) != source_stat_identity:
             raise RuntimeError("The source recording changed during preflight QC; run QC again.")
 
     bounded_status = status_bound is not None and status_bound.bounded_status
@@ -1876,6 +1876,10 @@ def _scan_one_preflight_file_v2(
         _record_timing("lazy_open", open_started)
         if raw is None:
             raise RuntimeError("EEG lazy loader returned no raw data.")
+        file_identity = source_stat_identity
+        admitted_sources = getattr(raw, "_studio_source_sha256_by_file", None)
+        if admitted_sources is not None:
+            file_identity = {**source_stat_identity, "source_sha256_by_file": admitted_sources}
         _require_current_status_bound()
         if _cancelled():
             raise _PreflightQcCancelled()

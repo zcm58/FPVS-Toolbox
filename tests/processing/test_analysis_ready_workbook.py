@@ -69,6 +69,7 @@ def test_workbook_formatting_preserves_all_serialized_values_and_styles(tmp_path
             "QC Notes": ["", None, "A" * 100, "line\nbreak", "=1+2", "é", "0", "ok"],
             "Reviewed": [False, True] * 4,
             "Date": [datetime(2026, 9, 7)] * 8,
+            "=Run group": ["#N/A"] * 8,
         }),
         "Empty": pd.DataFrame(columns=["RMS", "Hz", "Note"]),
         "No columns": pd.DataFrame(),
@@ -99,7 +100,7 @@ def test_workbook_formatting_preserves_all_serialized_values_and_styles(tmp_path
                 }
             for left_row, right_row in zip(left, right):
                 for a, b in zip(left_row, right_row):
-                    assert a.data_type == b.data_type
+                    assert b.data_type == ("s" if a.data_type in {"f", "e"} else a.data_type)
                     assert type(a.value) is type(b.value)
                     if isinstance(a.value, float):
                         assert a.value.hex() == b.value.hex()
@@ -570,6 +571,30 @@ def test_canonical_mixed_case_channels_preserve_roi_values_and_reviewed_flags(
         assert audited_central["Excluded Electrodes"] == "Cz"
     else:
         assert audited_central["Used Electrodes"] == "FCz, Cz, CPz"
+
+
+def test_full_audit_round_trips_project_labels_as_literal_text(tmp_path, monkeypatch):
+    root = tmp_path / "Project"
+    _build_fixture_project(root)
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["groups"]["anxious"]["label"] = "= Study arm"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    index = load_project_dataset_index(root)
+    coverage = _released_coverage(index, rois={"LOT": ["O1"]})
+    monkeypatch.setattr(export_module, "_require_analysis_ready_release", lambda _: (coverage, "test-final-release"))
+    result = write_analysis_ready_workbook(root, dataset_index=index, selection_metadata=_selection_metadata())
+    for data_only in (True, False):
+        book = load_workbook(result.path, data_only=data_only, read_only=True)
+        try:
+            rows = book[export_module.ROI_LONG_SHEET].iter_rows()
+            columns = [cell.value for cell in next(rows)]
+            row = next(cells for cells in rows if cells[columns.index("PID")].value == "P1")
+            group = row[columns.index("Group")]
+            assert (group.value, group.data_type) == ("= Study arm", "s")
+            assert row[columns.index("Raw Summed BCA")].data_type == "n"
+        finally:
+            book.close()
 
 
 def test_full_audit_workbook_keeps_excluded_values_and_flags(

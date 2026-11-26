@@ -20,6 +20,7 @@ from Main_App.processing.condition_interpolation_state import (
     project_processing_identity,
 )
 from Main_App.processing.pipeline_plan import PREPARED_RAW_QC_BY_FILE
+from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_approval
 
 
 SNAPSHOT_VERSION = "condition_interpolation_run_snapshot_v1"
@@ -256,17 +257,17 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
             # Snapshot verification also prevents adopting old receipts after
             # project filter/protocol changes that have not been processed yet.
             try:
-                _load_snapshot(root)
-                snapshot_current = True
+                reviewed = _load_snapshot(root)
+                entry = next((row for key, row in ledger.get("entries", {}).items()
+                              if key.casefold() == identity.casefold()), {})
+                snapshot_current = _repair_source_matches(reviewed, state["source_identities"].get(identity, {}), entry)
             except ConditionInterpolationProcessingRequired:
                 snapshot_current = False
             if adoption_ready and snapshot_current and _receipts_match_requests(
                 receipts, active, expected,
             ):
                 try:
-                    _complete_receipts(root, identity, state, expected, receipts,
-                                       next((row for key, row in ledger.get("entries", {}).items()
-                                             if key.casefold() == identity.casefold()), {}))
+                    _complete_receipts(root, identity, state, expected, receipts, entry)
                 except (KeyError, OSError, TypeError, ValueError):
                     continue
                 save_condition_interpolation_state(root, state, expected_state=baseline)
@@ -287,6 +288,15 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
         if record is None:
             raise ConditionInterpolationProcessingRequired(f"No reviewed processing input is saved for {identity}. Run Processing again.")
         raw = record["raw_file_identity"]
+        source = state["source_identities"].get(identity, {})
+        entry = ledger.get("entries", {}).get(record["processing_id"], {})
+        if not _repair_source_matches(snapshot, source, entry) or (
+            source.get("source_sha256_by_file") is not None
+            and Path(record["info"]["path"]).resolve() != Path(source["raw_file"]).resolve()
+        ):
+            raise ConditionInterpolationProcessingRequired(
+                f"The reviewed inputs for {identity} differ from its approved Studio source. Run Processing again."
+            )
         stat = Path(raw["raw_file"]).stat()
         if stat.st_size != raw["raw_size"] or stat.st_mtime_ns != raw["raw_mtime_ns"]:
             raise ConditionInterpolationProcessingRequired(f"The source recording changed for {identity}. Run Processing again.")
@@ -326,6 +336,10 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
         if not active:
             raise ConditionInterpolationPendingError("Run Processing again to reconcile the explicit recording-condition exclusions.")
         result = _run_recording(root, snapshot, records[identity.casefold()], {identity: active}, log_func=log)
+        if not _repair_source_matches(snapshot, state["source_identities"].get(identity, {}), result):
+            raise ConditionInterpolationProcessingRequired(
+                f"The repair did not attest the approved Studio recording for {identity}. Run Processing again."
+            )
         receipts = result.get("export_receipts") or result.get("audit", {}).get("export_receipts") or []
         if not _receipts_match_requests(receipts, active, expected):
             raise ConditionInterpolationPendingError(f"Not every requested condition was exported for {identity}.")
@@ -358,6 +372,14 @@ def execute_pending_condition_interpolations(project_root, *, log_func=None) -> 
         save_condition_interpolation_state(root, state, expected_state=baseline)
         baseline = deepcopy(state)
     return True
+
+
+def _repair_source_matches(snapshot, source, evidence) -> bool:
+    approved = source.get("source_sha256_by_file")
+    if not source.get("raw_file"):
+        return False
+    saved = studio_source_approval(snapshot["settings"].get(STUDIO_SOURCE_APPROVALS_KEY), source["raw_file"])
+    return saved == approved and (approved is None or evidence.get("source_sha256_by_file") == approved)
 
 
 def _receipts_match_requests(receipts, requests, expected) -> bool:

@@ -500,6 +500,17 @@ fingerprint. Processing validates that reviewed plan against the current
 protocol and event map before attempting a cache lookup; an internally valid
 plan from an older project context cannot authorize reuse.
 
+For a Studio-matched BrainVision or BVRF recording, the worker records the
+per-file SHA-256 digests verified during BIDS admission. The preprocessed cache
+key includes only that recording's approved digests. Reuse requires its saved
+admission evidence to match. Completed recordings and exclusions based on raw
+channel QC retain this evidence as `source_sha256_by_file` in the processing
+ledger. A changed Studio approval or missing historical evidence requires a
+fresh run for signal-based results. When every condition is explicitly
+excluded, the worker records the no-data decision before loading the recording.
+Restoring a condition makes the recording eligible for processing again.
+Source digests are independent of the scientific method fingerprint.
+
 After frequency-domain QC is accepted, processing completion calculates the
 project-wide significant-harmonic list once through
 `Main_App.processing.harmonic_selection_qc`, persists its exact fingerprinted

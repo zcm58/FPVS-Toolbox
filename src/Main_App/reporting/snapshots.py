@@ -103,6 +103,8 @@ def queue_snapshot(project_root: Path, manifest: dict[str, Any], results_csv: st
                 raise ValueError(
                     "A snapshot is already pending. Retry its original bytes before sharing another revision."
                 )
+        if state["dataset_id"] != manifest.get("dataset_id"):
+            raise ValueError("The reporting dataset changed during export.")
         if state.get("scope") != {
             key: manifest[key] for key in ("study_id", "experiment_id", "experiment_version", "protocol_sha256")
         }:
@@ -115,7 +117,7 @@ def queue_snapshot(project_root: Path, manifest: dict[str, Any], results_csv: st
                 raise ValueError("OpenFPVS already accepted this exact result revision.")
         revision = dict(manifest)
         revision.update(
-            dataset_id=state["dataset_id"], snapshot_id=str(uuid4()), parent_snapshot_id=state["last_snapshot_id"]
+            snapshot_id=str(uuid4()), parent_snapshot_id=state["last_snapshot_id"]
         )
         revision["snapshot_sha256"] = snapshot_sha256(revision, results_csv)
         manifest_json = canonical_json({key: value for key, value in revision.items() if key != "snapshot_sha256"})

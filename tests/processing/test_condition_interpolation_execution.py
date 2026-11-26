@@ -41,6 +41,43 @@ def test_queue_preserves_canonical_recording_identity_and_deduplicates(tmp_path)
     assert manifest["tools"]["other_tool"] == {"keep": True}
 
 
+def test_studio_repair_requires_same_approved_source_in_review_inputs_and_worker(tmp_path):
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_approvals
+    from tests.test_brain_products_reader import _write_bvcdf
+
+    _, _, decision, report = _project(tmp_path)
+    path, _ = _write_bvcdf(tmp_path)
+    hashes = source_hashes_by_file(recording_content_identity(path))
+    manifest = json.loads((tmp_path / "project.json").read_text())
+    manifest["tools"].pop(state_api.STATE_KEY)
+    manifest["tools"]["studio_cohort"] = {
+        "raw_folder": str(tmp_path), "versions": {"v1": {}},
+        "visits": {"one": {"raw_file": path.name, "decision": "matched", "protocol_version_id": "v1",
+                           "source_sha256_by_file": hashes}},
+    }
+    ledger = {"entries": {"P01": raw_file_metadata(path)}}
+    save_ledger(tmp_path, ledger)
+    with pytest.raises(ValueError, match="reviewed source recording changed"):
+        state_api.queue_condition_interpolation_decisions(manifest, [decision], report)
+    ledger["entries"]["P01"]["source_sha256_by_file"] = hashes
+    save_ledger(tmp_path, ledger)
+    state_api.queue_condition_interpolation_decisions(manifest, [decision], report)
+    source = manifest["tools"][state_api.STATE_KEY]["source_identities"]["P01"]
+    snapshot = {"settings": {STUDIO_SOURCE_APPROVALS_KEY: studio_source_approvals(manifest)}}
+    assert not executor._repair_source_matches({"settings": {}}, source, ledger["entries"]["P01"])
+    assert not executor._repair_source_matches(snapshot, source, {})
+    assert executor._repair_source_matches(snapshot, source, ledger["entries"]["P01"])
+    state_api.atomic_json(tmp_path / "project.json", manifest)
+    assert state_api.active_condition_interpolation_requests(tmp_path) == {"P01": {"Faces": ["O2"]}}
+    reviewed_visit = manifest["tools"]["studio_cohort"]["visits"]["one"]
+    reviewed_visit["source_sha256_by_file"] = {**hashes, str(path): "0" * 64}
+    state_api.atomic_json(tmp_path / "project.json", manifest)
+    assert state_api.active_condition_interpolation_requests(tmp_path) == {}
+    active, retired = state_api.reconcile_condition_interpolation_sources(tmp_path)
+    assert not active and retired
+
+
 def test_queue_uses_upstream_qualified_channel_order(tmp_path, monkeypatch):
     from Main_App.io import geometry_metadata
 
@@ -410,10 +447,10 @@ def test_source_retirement_serializes_with_a_concurrent_qc_acceptance(tmp_path, 
     checking, release, attempted, published = (Event() for _ in range(4))
     original_source_check = state_api._source_matches_active_path
 
-    def hold_source_check(source, identity, current_sources):
+    def hold_source_check(source, identity, current_sources, approvals):
         checking.set()
         assert release.wait(10)
-        return original_source_check(source, identity, current_sources)
+        return original_source_check(source, identity, current_sources, approvals)
 
     def accept_review():
         path = tmp_path / "project.json"

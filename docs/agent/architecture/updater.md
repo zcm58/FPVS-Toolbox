@@ -106,7 +106,11 @@ remain portable to CachyOS.
 
 1. Discovery uses release metadata and the installed inventory identity to
    offer a direct patch when supported, or the full installer otherwise. It
-   does not repeatedly hash the installed scientific runtime while checking.
+   selects the newest eligible version for the current channel before checking
+   its assets. Ambiguous installer metadata on that selected release blocks
+   installation. Older releases' packaging errors do not block the selected
+   update or repair. Discovery uses the installed inventory identity without
+   repeatedly hashing the scientific runtime.
 2. Download streams into a guarded temporary cache file, reports progress,
    verifies expected size/SHA-256, then publishes the file and receipt.
 3. Explicit install confirmation checks Toolbox's processing/export/QC guards,

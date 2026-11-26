@@ -408,6 +408,20 @@ alone cannot establish that relationship. Keep the original roster and its
 receipts. Use the saved EEG location and reviewed recording identities to
 preview changes against the last accepted handoff and the last processed cohort.
 Carry forward a match or review only while its source evidence is still valid.
+BrainVision approvals include file metadata and SHA-256 for the header,
+signal, marker and any impedance companion. Review fingerprints selectable
+recordings in the background worker. Commit rechecks the inventory and reads
+the component bytes again only for matched or retained recordings. Changed bytes and historical
+approvals without content hashes require a fresh recording choice.
+The BIDS reader checks the approved hashes against the source identity it
+already calculated before reusing or publishing a dataset. Preflight binds
+its event, screening and occurrence caches to that admitted content.
+Unreadable recordings are shown separately
+so the remaining visits can still be reviewed. Study discovery reports damaged
+sibling projects individually. A unique readable match can reopen. When no match
+is found, the analyst can explicitly accept the named unreadable projects and
+continue creating the study. Publication checks for a newly discoverable match
+and any additional unreadable projects before publishing.
 Keep an explicitly deferred missing recording in the roster with its status
 separate from a QC exclusion. When a revision omits a processed visit, retain
 its registration, review and prior results until the analyst explicitly
@@ -421,6 +435,16 @@ the existing project untouched. Follow the
 [registration and release rules](#multi-group-processing-foundation) for new
 inputs and the [product contract](../product-specs/fpvs-toolbox.md#whole-study-handoff-after-collection)
 for results tied to the prior cohort.
+
+Studio receipts and previous workbooks use regular files under
+`.fpvs_imports/studio`. Each parent must resolve within the project.
+Preserving a workbook records the
+SHA-256 of the copied bytes. **Open previous Excel result** verifies the
+canonical XLSX path, checksum and workbook format before desktop dispatch.
+Earlier history entries can use the checksum in their recorded release.
+For a visible smoke check, open a previous result from a disposable Studio
+project, then replace the archived copy with an unrelated text file and confirm
+that the same button reports the checksum failure.
 
 ## Manifest transactions
 

@@ -34,6 +34,12 @@ from Main_App.diagnostics.crash_reporting import report_failure
 from Main_App.io.atomic_write import atomic_write
 from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
+from Main_App.projects.studio_recording_identity import (
+    STUDIO_SOURCE_APPROVALS_KEY,
+    read_project_studio_source_approvals,
+    studio_source_approval,
+    studio_source_path_key,
+)
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.processing.pipeline_plan import (
     PREPARED_RAW_QC_BY_FILE,
@@ -434,6 +440,15 @@ def _recording_mapping_payload(
 def _recording_job_settings(file_path: Path, settings: Dict[str, object]) -> Dict[str, object]:
     """Keep the full run identity and send only this recording's reviewed evidence."""
     local = dict(settings)
+    approvals = local.get(STUDIO_SOURCE_APPROVALS_KEY)
+    if approvals:
+        local[STUDIO_SOURCE_APPROVALS_KEY] = {}
+        if file_path.suffix.lower() in {".vhdr", ".bvrh"}:
+            key = studio_source_path_key(file_path)
+            if key not in approvals:
+                key = studio_source_path_key(file_path.resolve())
+            if key in approvals:
+                local[STUDIO_SOURCE_APPROVALS_KEY] = {key: approvals[key]}
     plans = settings.get("_fpvs_preflight_event_plans_by_file")
     if type(plans) is dict:
         local["_fpvs_preflight_event_plans_by_file"] = {
@@ -814,6 +829,7 @@ def _make_excluded_result(
     preflight_info: Optional[Any] = None,
     qc_info: Optional[Dict[str, object]] = None,
     geometry: Optional[Mapping[str, object]] = None,
+    source_sha256_by_file: dict[str, str] | None = None,
 ) -> Dict[str, object]:
     elapsed_ms: Optional[int] = None
     if start_time is not None:
@@ -845,6 +861,8 @@ def _make_excluded_result(
         payload["raw_channel_qc"] = qc_info
     if geometry is not None:
         payload["geometry"] = dict(geometry)
+    if source_sha256_by_file is not None:
+        payload["source_sha256_by_file"] = source_sha256_by_file
     return payload
 
 
@@ -1020,8 +1038,10 @@ def _preproc_cache_payload(
     acquisition_identity = cache_acquisition_identity(settings)
     if acquisition_identity is not None:
         relevant_settings["acquisition"] = acquisition_identity
+    approved = studio_source_approval(settings.get(STUDIO_SOURCE_APPROVALS_KEY), file_path)
     return {
         **companion_identity(file_path),
+        **({"source_sha256_by_file": approved} if approved is not None else {}),
         "version": PREPROC_CACHE_VERSION,
         "mne_version": mne_version,
         "source_path": str(file_path.resolve()),
@@ -1144,6 +1164,11 @@ def _load_preprocessed_cache(
         metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         if metadata.get("cache_key") != cache_key or metadata.get("payload") != payload:
             return None, None, 0, "miss_metadata_mismatch"
+        audit_before = metadata.get("audit_before")
+        if not isinstance(audit_before, dict):
+            return None, None, 0, "miss_missing_audit"
+        if audit_before.get("source_sha256_by_file") != payload.get("source_sha256_by_file"):
+            return None, None, 0, "miss_studio_source_evidence"
         exact_filter_info = metadata.get("exact_filter_info")
         if not isinstance(exact_filter_info, Mapping):
             return None, None, 0, "miss_missing_filter_metadata"
@@ -1215,9 +1240,6 @@ def _load_preprocessed_cache(
             settings["_fpvs_analysis_scoring_sample_count"] = int(
                 realized_span_plan["unique_sample_count"]
             )
-        audit_before = metadata.get("audit_before")
-        if not isinstance(audit_before, dict):
-            return None, None, 0, "miss_missing_audit"
         settings["_fpvs_kurtosis_bad_channels"] = _string_list(
             metadata.get("kurtosis_bad_channels")
         )
@@ -1366,6 +1388,8 @@ def _store_preprocessed_cache(
     raw_path, meta_path = _preproc_cache_paths(project_root, file_path, cache_key)
 
     try:
+        if audit_before.get("source_sha256_by_file") != payload.get("source_sha256_by_file"):
+            raise ValueError("Preprocessing cache requires matching Studio recording admission evidence.")
         if not safe_cache_directory(project_root.absolute(), raw_path.parent.absolute()):
             raise OSError(f"Refusing a redirected preprocessed cache directory: {raw_path.parent}")
         raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1917,6 +1941,8 @@ def _run_full_pipeline_for_file(
 
         # 1) Cache lookup, then load/preprocess only on misses.
         stage = "cache_lookup"
+        if file_path.suffix.lower() in {".vhdr", ".bvrh"} and STUDIO_SOURCE_APPROVALS_KEY not in settings:
+            settings[STUDIO_SOURCE_APPROVALS_KEY] = read_project_studio_source_approvals(project_root)
         logger.debug("[PIPELINE STAGE] file=%s stage=cache_lookup_start", file_path.name)
         section_started = time.perf_counter()
         raw_proc, audit_before, n_rejected, cache_status = _load_preprocessed_cache(
@@ -1927,6 +1953,7 @@ def _run_full_pipeline_for_file(
             frequency_protocol=frequency_protocol,
             event_map=event_map,
         )
+        admitted_hashes = audit_before.get("source_sha256_by_file") if audit_before else None
         _record_timing("cache_lookup", section_started)
         logger.debug(
             "[PIPELINE] %s: preproc cache status=%s",
@@ -1955,6 +1982,12 @@ def _run_full_pipeline_for_file(
             _record_timing("load", section_started)
             if raw is None:
                 raise RuntimeError("load_eeg_file returned None")
+            approved = studio_source_approval(settings.get(STUDIO_SOURCE_APPROVALS_KEY), file_path)
+            if approved is not None:
+                admitted_hashes = getattr(raw, "_studio_source_sha256_by_file", None)
+                if admitted_hashes != approved:
+                    raw.close()
+                    raise ValueError("Loaded recording lacks the matching Studio source admission evidence.")
             logger.debug("[PIPELINE STAGE] file=%s stage=load_done", file_path.name)
 
             sfreq = float(raw.info.get("sfreq", -1.0))
@@ -2086,6 +2119,7 @@ def _run_full_pipeline_for_file(
                         settings,
                     ),
                     geometry=read_raw_eeg_geometry(raw),
+                    source_sha256_by_file=admitted_hashes,
                 )
             logger.debug(
                 "raw_channel_qc_passed file=%s n_bad=%d n_channels=%d",
@@ -2191,6 +2225,8 @@ def _run_full_pipeline_for_file(
                 settings,
                 file_path.name,
             )
+            if admitted_hashes is not None:
+                audit_before["source_sha256_by_file"] = admitted_hashes
             _record_timing("preproc_audit_before", section_started)
             logger.debug(
                 "[PIPELINE] %s: preproc audit_before complete",
@@ -2692,7 +2728,9 @@ def _run_full_pipeline_for_file(
                     "source-ready time-domain derivatives were not published."
                 )
             source_epochs = _available_source_epoch_set(epochs_dict, event_map)
+            merge_options = {}
             if requested_exports is not None:
+                merge_options = {"merge_existing": True, "required_condition_labels": tuple(source_epochs)}
                 source_epochs = {label: epochs for label, epochs in source_epochs.items() if label in export_conditions}
             from Main_App.processing.processing_ledger import raw_file_metadata
             source_result = write_source_ready_time_domain_derivatives(
@@ -2759,7 +2797,7 @@ def _run_full_pipeline_for_file(
                     }
                     for label in source_epochs
                 },
-                **({"merge_existing": True} if requested_exports is not None else {}),
+                **merge_options,
             )
             source_derivative_status = "complete"
             source_derivative_manifest = source_ready_project_relative_path(
@@ -2919,6 +2957,7 @@ def _run_full_pipeline_for_file(
             "stage": "done",
             "elapsed_ms": elapsed_ms,
             "audit": audit_after,
+            **({"source_sha256_by_file": admitted_hashes} if admitted_hashes is not None else {}),
             "problems": problems,
             "events_info": events_info,
             "timings_ms": dict(timings_ms),

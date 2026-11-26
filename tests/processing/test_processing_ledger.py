@@ -117,6 +117,60 @@ def test_legacy_enabled_screen_keeps_fingerprint_and_disabled_changes_it(tmp_pat
     assert build_processing_fingerprint(project, {**settings, field: False}, project.event_map) != baseline
 
 
+@pytest.mark.parametrize("status", ["ok", "excluded"])
+def test_ledger_records_worker_admission_separately_from_processing_fingerprint(tmp_path, status):
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_path_key
+    from tests.test_brain_products_reader import _write_bvcdf
+
+    project, original = _project_with_raw(tmp_path)
+    source, _ = _write_bvcdf(original.path.parent)
+    info = RawFileInfo(source.resolve(), "P01")
+    hashes = source_hashes_by_file(recording_content_identity(source))
+    settings = {**_settings(), STUDIO_SOURCE_APPROVALS_KEY: {studio_source_path_key(source): hashes}}
+    assert build_processing_fingerprint(project, settings, project.event_map) == build_processing_fingerprint(
+        project, _settings(), project.event_map,
+    )
+    plan = classify_processing_inputs(project, [info], settings, project.event_map)
+    _write_expected_outputs(plan)
+    result = {"file": str(source), "status": status, "source_sha256_by_file": hashes,
+              "geometry": biosemi64_geometry_identity()}
+    if status == "excluded":
+        result.update(reason="raw_channel_qc_failure", stage="raw_qc")
+    record_processing_results(project, plan, [result], run_mode="Batch", user_choice="incremental", cancelled=False)
+    entry = processing_ledger_module.load_ledger(project.project_root)["entries"]["P01"]
+    assert entry["status"] == ("completed" if status == "ok" else "excluded")
+    assert entry["source_sha256_by_file"] == hashes
+    assert "source_sha256_by_file" not in processing_ledger_module.raw_file_metadata(source)
+
+
+def test_all_studio_conditions_excluded_before_admission_can_be_restored(tmp_path):
+    from tests.test_brain_products_reader import _write_bvcdf
+
+    project, original = _project_with_raw(tmp_path)
+    path, _ = _write_bvcdf(original.path.parent)
+    info = RawFileInfo(path.resolve(), "P01")
+    # Even a legacy match without reviewed digests can record an explicit no-data decision.
+    project.manifest.setdefault("tools", {})["studio_cohort"] = {
+        "raw_folder": str(path.parent), "versions": {"v1": {}},
+        "visits": {"first": {"decision": "matched", "raw_file": path.name, "protocol_version_id": "v1"}},
+    }
+    excluded = {**_settings(), "manual_excluded_participant_conditions": {"P01": ["Condition A"]}}
+    plan = classify_processing_inputs(project, [info], excluded, project.event_map)
+    record_processing_results(
+        project, plan, [{"file": str(path), "status": "excluded", "stage": "condition_scope",
+                         "reason": "all_conditions_excluded_from_analysis"}],
+        run_mode="Batch", user_choice="incremental", cancelled=False,
+    )
+    entry = processing_ledger_module.load_ledger(project.project_root)["entries"]["P01"]
+    assert entry["status"] == "excluded" and "source_sha256_by_file" not in entry
+    kept = classify_processing_inputs(project, [info], excluded, project.event_map)
+    assert kept.states[0].status == "excluded" and not kept.incremental_files
+    restored = classify_processing_inputs(project, [info], _settings(), project.event_map)
+    assert restored.states[0].status == "changed_settings" and restored.incremental_files == (info.path,)
+    assert carry_forward_pre_qc_completed_states(project, kept, restored) == restored
+
+
 def test_processing_persists_per_recording_screen_settings_and_requires_rerun_after_change(tmp_path):
     from dataclasses import replace
 
@@ -1025,6 +1079,56 @@ def test_classify_completed_requires_ledger_and_expected_outputs(tmp_path) -> No
     assert plan.completed_count == 1
     assert plan.incremental_files == ()
     assert plan.states[0].status == "completed"
+
+
+@pytest.mark.parametrize("status", ["completed", "excluded"])
+def test_studio_incremental_reuse_binds_the_processed_companion_hashes(tmp_path, status):
+    from dataclasses import replace
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.processing import expected_processing_ledger as expected
+    from tests.test_brain_products_reader import _write_bvcdf
+
+    project, original = _project_with_raw(tmp_path)
+    path, _ = _write_bvcdf(original.path.parent)
+    info = RawFileInfo(path.resolve(), "P01")
+    approved = source_hashes_by_file(recording_content_identity(path))
+    project.manifest.setdefault("tools", {})["studio_cohort"] = {
+        "raw_folder": str(path.parent), "versions": {"v1": {}},
+        "visits": {"first": {"decision": "matched", "raw_file": path.name, "protocol_version_id": "v1",
+                             "source_sha256_by_file": approved}},
+    }
+    def classify():
+        return classify_processing_inputs(project, [info], _settings(), project.event_map)
+
+    initial = classify()
+    _write_expected_outputs(initial)
+    result = {"file": str(info.path), "geometry": biosemi64_geometry_identity(), "source_sha256_by_file": approved,
+              "status": "ok" if status == "completed" else "excluded"}
+    if status == "excluded":
+        result.update(reason="raw_channel_qc", audit={"geometry": biosemi64_geometry_identity()})
+    record_processing_results(project, initial, [result], run_mode="Batch", user_choice="incremental", cancelled=False)
+    verified = classify()
+    assert verified.states[0].status == status
+    prior = processing_ledger_module.load_ledger(project.project_root)
+    row = prior["entries"][info.processing_id]
+    protocol = FrequencyProtocol.from_recurrence(5, 5, expected_analyzed_oddball_cycles=2,
+                                                expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL)
+    for evidence in (None, {**approved, str(path.with_suffix(".eeg")): "0" * 64}):
+        row["source_sha256_by_file"] = evidence
+        save_ledger(project.project_root, prior)
+        stale = classify()
+        assert stale.states[0].status == "changed_raw"
+        pending_settings = replace(stale, states=(replace(stale.states[0], status="changed_settings"),))
+        assert carry_forward_pre_qc_completed_states(project, verified, pending_settings) == pending_settings
+        with pytest.raises(expected.ExpectedRecordingConditionPlanError, match="approved Studio source"):
+            expected.build_expected_recording_condition_plan(
+                processing_plan=verified, event_map=project.event_map, frequency_protocol=protocol,
+                approved_event_plans={}, prior_ledger=prior,
+            )
+    if status == "excluded":
+        row["exclusion_reason"] = "recording_not_started"
+        save_ledger(project.project_root, prior)
+        assert classify().states[0].status == "excluded"
 
 
 def test_classify_missing_expected_output_is_stale(tmp_path) -> None:

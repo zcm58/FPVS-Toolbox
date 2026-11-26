@@ -7,13 +7,14 @@ from dataclasses import replace
 import hashlib
 import io
 import json
+from pathlib import Path
 import stat
 from threading import Event
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import pytest
 
-from Main_App.projects import FrequencyProtocol
+from Main_App.projects import FrequencyProtocol, Project
 from Main_App.projects import experiment_library as library
 from Main_App.projects import public_datasets as catalog
 
@@ -167,6 +168,142 @@ def test_archive_rejects_project_path_escape_before_model_loading(tmp_path, fiel
         library.validate_dataset_archive(archive, item)
 
 
+def _repeated_payloads(folder="Input", raw_file="Input/P1.bdf"):
+    payloads = _payloads()
+    project = json.loads(payloads["project.json"])
+    project["sessions"] = {"visit1": {"visit_index": 1}}
+    project["recording_sources"] = {
+        "demo_visit1": {"group_id": "demo", "session_id": "visit1", "raw_input_folder": folder},
+    }
+    project["recordings"] = {
+        "p1_visit1": {"participant_id": "P1", "source_id": "demo_visit1", "session_id": "visit1", "raw_file": raw_file},
+    }
+    payloads["project.json"] = json.dumps(project).encode()
+    return payloads
+
+
+@pytest.mark.parametrize(("folder", "raw_file", "expected_error"), [
+    ("Input", "Input/P1.bdf", None),
+    ("LocalRecordings", "Input/P1.bdf", "recording source"),
+    ("Input", "Input/P2.bdf", "packaged BDF file"),
+    ("Input", "README.md", "packaged BDF file"),
+])
+def test_public_install_checks_repeated_recordings_against_package(
+    tmp_path, monkeypatch, folder, raw_file, expected_error,
+):
+    payloads = _repeated_payloads(folder, raw_file)
+    archive, item = _archive(tmp_path, payloads=payloads)
+    _serve(monkeypatch, archive)
+    root = tmp_path / "Projects"
+    root.mkdir()
+    if expected_error is None:
+        target = library.install_public_dataset(item, root)
+        assert (target / raw_file).read_bytes() == payloads[raw_file]
+        assert json.loads((target / ".openfpvs-dataset.json").read_bytes())["recording_path_validation"]
+    else:
+        phases = []
+        with pytest.raises(library.LibraryError, match=expected_error):
+            library.install_public_dataset(item, root, phase_callback=phases.append)
+        assert phases == ["download", "verify"]
+        assert not any(child.is_dir() for child in root.iterdir())
+
+
+def _old_install(tmp_path, folder="Input", raw_file="Input/P1.bdf"):
+    payloads = _repeated_payloads(folder, raw_file)
+    archive, item = _archive(tmp_path, payloads=payloads)
+    target = tmp_path / "Projects" / f"{item.item_id}-{item.version}"
+    target.mkdir(parents=True)
+    with ZipFile(archive) as zipped:
+        for name in (*payloads, "dataset-manifest.json"):
+            dest = target / name
+            dest.parent.mkdir(exist_ok=True)
+            dest.write_bytes(zipped.read(name))
+    receipt = target / ".openfpvs-dataset.json"
+    receipt.write_text(json.dumps({"schema_version": "1.0", "dataset": item.to_dict(), "origin": catalog.DEFAULT_ORIGIN}))
+    return target, item
+
+
+@pytest.mark.parametrize(("folder", "raw_file"), [("LocalRecordings", "LocalRecordings/P1.bdf"), ("Input", "Input/P2.bdf")])
+def test_legacy_package_recording_paths_rejected_offline_and_on_direct_open(tmp_path, monkeypatch, folder, raw_file):
+    target, item = _old_install(tmp_path, folder, raw_file)
+    manifest = target / "project.json"
+    receipt = target / ".openfpvs-dataset.json"
+    before = manifest.read_bytes(), receipt.read_bytes()
+    monkeypatch.setattr(library, "public_response", lambda *a, **k: pytest.fail("offline"))
+    notices = []
+    assert library.list_installed_datasets(target.parent, on_notice=notices.append) == ()
+    assert len(notices) == 1 and "Keep a backup" in notices[0]
+    for reopen in (
+        lambda: library.installed_dataset_path(item, target.parent),
+        lambda: library.install_public_dataset(item, target.parent),
+        lambda: Project.load(target),
+        lambda: Project.load(target, manifest={}),
+    ):
+        with pytest.raises(library.LibraryError, match="use the BDF paths listed in dataset-manifest.json"):
+            reopen()
+    assert (manifest.read_bytes(), receipt.read_bytes()) == before
+    assert not (target / "1 - Excel Data Files").exists()
+
+
+@pytest.mark.parametrize("direct_first", [False, True])
+def test_legacy_package_migrates_offline_preserving_edits_and_later_external_sources(tmp_path, monkeypatch, direct_first):
+    target, item = _old_install(tmp_path)
+    monkeypatch.setattr(library, "public_response", lambda *a, **k: pytest.fail("offline"))
+    manifest = target / "project.json"
+    project = json.loads(manifest.read_bytes())
+    project["name"] = "My local visits"
+    project["recordings"]["p1_visit1"]["raw_file"] = str(Path("Input") / "P1.bdf")
+    project["recording_sources"]["demo_visit1"]["raw_input_folder"] = str(target / "Input")
+    manifest.write_text(json.dumps(project))
+    edited = manifest.read_bytes()
+    if direct_first:
+        assert Project.load(target).recordings["p1_visit1"]["raw_file"] == target / "Input" / "P1.bdf"
+    else:
+        assert library.list_installed_datasets(target.parent) == (item,)
+    assert manifest.read_bytes() == edited
+    receipt = json.loads((target / ".openfpvs-dataset.json").read_bytes())
+    assert receipt["recording_path_validation"] and receipt["origin"] == catalog.DEFAULT_ORIGIN
+
+    local = tmp_path / "My recordings"
+    local.mkdir()
+    project["recording_sources"]["demo_visit1"]["raw_input_folder"] = str(local)
+    project["recordings"]["p1_visit1"]["raw_file"] = str(local / "P1.bdf")
+    manifest.write_text(json.dumps(project))
+    assert library.install_public_dataset(item, target.parent) == target
+    assert Project.load(target).recordings["p1_visit1"]["raw_file"] == local / "P1.bdf"
+
+
+def test_legacy_migration_rejects_oversize_inventory_before_model_loading(tmp_path):
+    target, _ = _old_install(tmp_path)
+    (target / "dataset-manifest.json").write_bytes(b" " * (library._JSON_LIMIT + 1))
+    with pytest.raises(library.LibraryError, match="file manifest exceeds its size limit"):
+        Project.load(target)
+    assert "recording_path_validation" not in json.loads((target / ".openfpvs-dataset.json").read_bytes())
+
+
+def test_legacy_external_edit_can_be_recovered_and_registered_again(tmp_path):
+    target, item = _old_install(tmp_path)
+    manifest = target / "project.json"
+    packaged = json.loads(manifest.read_bytes())
+    external = tmp_path / "Previously added recordings"
+    external.mkdir()
+    edited = json.loads(manifest.read_bytes())
+    edited["name"] = "My local settings"
+    edited["recording_sources"]["demo_visit1"]["raw_input_folder"] = str(external)
+    edited["recordings"]["p1_visit1"]["raw_file"] = str(external / "P1.bdf")
+    manifest.write_text(json.dumps(edited))
+    backup = manifest.read_bytes()
+    with pytest.raises(library.LibraryError, match="register any trusted external recordings again"):
+        Project.load(target)
+    assert manifest.read_bytes() == backup
+
+    packaged["name"] = edited["name"]
+    manifest.write_text(json.dumps(packaged))
+    assert library.installed_dataset_path(item, target.parent) == target
+    manifest.write_bytes(backup)
+    assert Project.load(target).recording_sources["demo_visit1"]["raw_input_folder"] == external
+
+
 def test_install_opens_normal_project_and_reopens_offline_preserving_edits(tmp_path, monkeypatch):
     archive, item = _archive(tmp_path)
     root = tmp_path / "Projects"
@@ -251,3 +388,55 @@ def test_concurrent_installs_publish_once_and_reuse_the_same_project(tmp_path, m
     assert results[0] == results[1]
     assert len(calls) == 1
     assert len(library.list_installed_datasets(root)) == 1
+
+
+def test_local_discovery_preserves_valid_installation_with_damaged_siblings(tmp_path, monkeypatch):
+    archive, item = _archive(tmp_path)
+    _serve(monkeypatch, archive)
+    root = tmp_path / "Projects"
+    root.mkdir()
+    target = library.install_public_dataset(item, root)
+    broken = root / "A broken installation"
+    broken.mkdir()
+    (broken / ".openfpvs-dataset.json").write_text("{", encoding="utf-8")
+    (root / "Ordinary project").mkdir()
+    notices = []
+    assert library.list_installed_datasets(root, on_notice=notices.append) == (item,)
+    assert len(notices) == 1 and broken.name in notices[0]
+    assert library.installed_dataset_path(item, root) == target
+
+
+def test_local_manifest_read_enforces_limit_on_open_file(tmp_path, monkeypatch):
+    archive, item = _archive(tmp_path)
+    _serve(monkeypatch, archive)
+    root = tmp_path / "Projects"
+    root.mkdir()
+    manifest = library.install_public_dataset(item, root) / "project.json"
+    original_open = Path.open
+    read_sizes = []
+    grow_on_read = False
+
+    def observed_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        if path == manifest and stream.mode == "rb":
+            original_read = stream.read
+
+            def read(size=-1):
+                read_sizes.append(size)
+                if grow_on_read:
+                    with original_open(path, "ab") as writer:
+                        writer.write(b" ")
+                return original_read(size)
+
+            stream.read = read
+        return stream
+
+    monkeypatch.setattr(Path, "open", observed_open)
+    assert library.list_installed_datasets(root) == (item,)
+    assert read_sizes and all(0 < size <= library._JSON_LIMIT + 1 for size in read_sizes)
+    grow_on_read = True
+    with pytest.raises(library.LibraryError, match="changed while reading"):
+        library.installed_dataset_path(item, root)
+    manifest.write_bytes(b" " * (library._JSON_LIMIT + 1))
+    with pytest.raises(library.LibraryError, match="size limit"):
+        library.installed_dataset_path(item, root)

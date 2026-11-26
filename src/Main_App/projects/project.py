@@ -662,6 +662,10 @@ class Project:
         resolved_manifest_path = (
             manifest_file_path(manifest_path if manifest_path is not None else project_root / "project.json")
         )
+        if os.path.lexists(project_root / ".openfpvs-dataset.json"):
+            from .experiment_library import checked_library_project_manifest
+
+            manifest = checked_library_project_manifest(project_root, resolved_manifest_path, manifest)
 
         data: Dict[str, Any] = {}
         if manifest is None:

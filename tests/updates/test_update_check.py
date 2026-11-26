@@ -161,6 +161,21 @@ def test_two_equivalent_matching_versions_are_ambiguous() -> None:
         select_update_from_releases([release], current_version="1.3.0")
 
 
+@pytest.mark.parametrize("repair", [False, True])
+def test_older_ambiguous_release_does_not_block_selected_installer(monkeypatch, repair) -> None:
+    older = _release("v2.0.0")
+    older["assets"].extend(_release("v2.0")["assets"])
+    selected = _release("v2.2.0")
+    releases = [older, _release("v2.3.0b1", prerelease=True), selected]
+    monkeypatch.setattr(github_releases, "fetch_release_metadata", lambda *_args, **_kwargs: releases)
+    result = github_releases.check_update_candidate(
+        current_version="2.1.0", install_root=None, repair=repair,
+    )
+    assert result.update_available
+    assert result.latest_version == "2.2.0"
+    assert result.installer_asset_name == selected["assets"][0]["name"]
+
+
 def test_missing_or_wrong_version_installer_does_not_hide_latest_release() -> None:
     latest = _release("v2.0.0", asset_name="FPVSToolbox-12.0.0-setup.exe")
     result = select_update_from_releases([latest, _release("v1.3.0")], current_version="1.3.0")

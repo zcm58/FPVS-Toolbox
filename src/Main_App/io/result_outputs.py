@@ -23,7 +23,9 @@ def result_output_paths(output_root: Path | str | None) -> list[Path]:
     return sorted(
         path.resolve()
         for path in root.rglob("*")
-        if is_excel_workbook_file(path, suffixes=suffixes) and path.is_file()
+        if is_excel_workbook_file(path, suffixes=suffixes)
+        and not (path.name.startswith(".") and path.name.casefold().endswith(".tmp.xlsx"))
+        and path.is_file()
     )
 
 

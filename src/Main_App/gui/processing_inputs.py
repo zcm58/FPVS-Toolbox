@@ -824,6 +824,11 @@ def build_validated_params(host: Any) -> dict | None:
         "raw_spectral_screening": raw_spectral_screening.to_manifest(),
     }
     params.update(processing_metadata_snapshot(normalized))
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_approvals
+
+    reviewed_sources = studio_source_approvals(getattr(host.currentProject, "manifest", None))
+    if reviewed_sources or normalized.get("hardware_platform") == "brain_products":
+        params[STUDIO_SOURCE_APPROVALS_KEY] = reviewed_sources
 
     logger.debug(
         "VALIDATED_PARAMS_SNAPSHOT high_pass=%r low_pass=%r downsample_rate=%r "

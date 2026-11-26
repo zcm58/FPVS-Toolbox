@@ -7,6 +7,41 @@ from Main_App.gui.studio_cohort_review import StudioCohortReview
 from Main_App.projects.studio_cohort import ReviewRow, StudyReview
 
 
+def test_archived_result_is_verified_before_desktop_dispatch(qtbot, tmp_path, monkeypatch):
+    from hashlib import sha256
+    from openpyxl import Workbook
+    from PySide6.QtWidgets import QPushButton
+    from Main_App.gui import open_paths
+    from Main_App.projects import project_manager
+
+    visit = {"visit_id": "visit1", "participant_number": "001", "participant_session_number": 1,
+             "protocol_version_id": "version-one"}
+    row = ReviewRow(visit, {}, (), "missing", "new", "")
+    prior = {"roster_sequence": 1, "visits": {}, "versions": ["version-one"],
+             "previous_result": ".fpvs_imports/studio/prior-results/notes.txt"}
+    review = StudyReview((row,), {}, {}, tmp_path, None, {"history": [prior]})
+    window = StudioCohortReview(SimpleNamespace(project_title="Study"), review, project_root=tmp_path)
+    qtbot.addWidget(window)
+    launched = []
+    def open_verified(path):
+        launched.append(path)
+        return True
+
+    monkeypatch.setattr(open_paths, "open_path_in_file_manager", open_verified)
+    monkeypatch.setattr(project_manager, "_run_source_registration_work", lambda _, work, label: work())
+    button = next(button for button in window.findChildren(QPushButton) if button.text() == "Open previous Excel result")
+    button.click()
+    assert not launched
+    assert "invalid workbook path" in window.feedback.text()
+    relative = f".fpvs_imports/studio/prior-results/{'a' * 64}.xlsx"
+    archive = tmp_path / relative
+    archive.parent.mkdir(parents=True)
+    Workbook().save(archive)
+    prior.update(previous_result=relative, previous_result_sha256=sha256(archive.read_bytes()).hexdigest())
+    button.click()
+    assert launched == [archive]
+
+
 def test_exception_first_and_full_roster_with_one_explicit_bulk_confirmation(qtbot, tmp_path):
     rows = []
     files = {}
@@ -84,19 +119,27 @@ def test_mixing_versions_names_affected_visits_and_risk_at_each_confirmation(qtb
 
 
 def test_share_dialog_only_transfers_after_click_and_holds_close(qtbot, tmp_path, monkeypatch):
+    from functools import partial
     from threading import Event
     from Main_App.gui import reporting_dialog
 
     started, finish = Event(), Event()
-    def deliver(_root):
+    calls = []
+
+    def deliver(action, root, *, expected_scope, retry=False):
+        calls.append((action, root, expected_scope, retry))
         started.set()
         finish.wait(timeout=5)
         return "delivered"
 
-    monkeypatch.setattr(reporting_dialog, "publish_current", deliver)
+    monkeypatch.setattr(reporting_dialog, "publish_current", partial(deliver, "share"))
+    monkeypatch.setattr(reporting_dialog, "deliver_pending", partial(deliver, "retry"))
+    scope = {"study_id": "synthetic", "experiment_id": "faces", "experiment_version": "1.0", "protocol_sha256": "2" * 64}
+    displayed = dict(scope)
     dialog = reporting_dialog.ResultsSharingDialog(
-        SimpleNamespace(project_root=tmp_path, name="Faces"), {"study_id":"synthetic", "experiment_id":"faces", "experiment_version":"1.0"}, None
+        SimpleNamespace(project_root=tmp_path, name="Faces"), scope, None
     )
+    scope["experiment_version"] = "2.0"
     qtbot.addWidget(dialog)
     dialog.show()
     assert not started.is_set()
@@ -109,5 +152,8 @@ def test_share_dialog_only_transfers_after_click_and_holds_close(qtbot, tmp_path
         finish.set()
     qtbot.waitUntil(lambda: dialog.thread is None)
     assert dialog.retry_button.isEnabled() and "accepted" in dialog.status.text()
+    qtbot.mouseClick(dialog.retry_button, Qt.LeftButton)
+    qtbot.waitUntil(lambda: len(calls) == 2 and dialog.thread is None)
+    assert calls == [("share", tmp_path, displayed, False), ("retry", tmp_path, displayed, True)]
     dialog.reject()
     assert not dialog.isVisible()
