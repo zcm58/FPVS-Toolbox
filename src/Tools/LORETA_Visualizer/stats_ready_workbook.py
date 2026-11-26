@@ -144,9 +144,8 @@ def write_loreta_stats_ready_workbook(
         subject_data=subject_data,
         base_freq=base_freq,
         rois=rois,
-        # Managed-project export resolves the accepted canonical profile inside
-        # the Stats export facade; this writer must not impose a group policy.
         dv_policy=None,
+        initial_selection_metadata=canonical_harmonics.metadata,
         group_map=group_map,
         group_label_map=group_label_map,
         log_func=log,

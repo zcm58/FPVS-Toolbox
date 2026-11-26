@@ -564,3 +564,81 @@ def test_prepare_stats_ready_export_reuses_summed_bca_facade_and_writes_workbook
 
     assert len(roundtrip) == 8
     assert set(roundtrip["group_id"]) == {"single_group"}
+
+
+def test_stats_ready_reuses_initial_policy_and_rechecks_live_selection(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from zipfile import ZipFile
+
+    from Main_App.processing import canonical_harmonics, frequency_domain_qc
+    from Tools.Stats.analysis import dv_policies
+
+    subjects, conditions, rois, subject_data, summed_bca, provenance, dv_metadata = _fixture_inputs()
+    initial = {
+        "base_frequency_hz": 6.0, "oddball_frequency_hz": 1.2,
+        "harmonic_policy": GROUP_SIGNIFICANT_POLICY_ID,
+        "included_harmonics_hz": [1.2, 2.4],
+        "selection_fingerprint": "a" * 64,
+    }
+    observed = dict(initial)
+    calls = []
+
+    def load_live_selection(**_kwargs):
+        calls.append("prepare")
+        return SimpleNamespace(metadata=observed)
+
+    def load_initial_policy(**_kwargs):
+        calls.append("policy")
+        return SimpleNamespace(metadata=observed)
+
+    def sum_from_verified_selection(*, dv_metadata, provenance_map, **_kwargs):
+        dv_metadata.update(
+            policy_name=GROUP_SIGNIFICANT_POLICY_NAME,
+            group_significant_harmonics=observed,
+        )
+        provenance_map.update(provenance)
+        return summed_bca
+
+    monkeypatch.setattr(canonical_harmonics, "load_project_processing_harmonics", load_initial_policy)
+    monkeypatch.setattr(dv_policies, "load_project_processing_harmonics", load_live_selection)
+    monkeypatch.setattr(dv_policies, "_prepare_group_significant_bca_data", sum_from_verified_selection)
+    monkeypatch.setattr(
+        frequency_domain_qc, "filter_frequency_domain_subjects",
+        lambda _root, subjects, data: (subjects, data, []),
+    )
+
+    arguments = dict(
+        subjects=subjects, conditions=conditions, rois=rois, subject_data=subject_data,
+        base_freq=6.0, dv_policy=None, group_map=None, log_func=lambda _message: None,
+        project_root=str(tmp_path),
+    )
+    independent = prepare_stats_ready_export(**arguments, save_path=tmp_path / "independent.xlsx")
+    assert calls == ["policy", "prepare"]
+    calls.clear()
+    target = tmp_path / "shared-step.xlsx"
+    shared = prepare_stats_ready_export(**arguments, save_path=target, initial_selection_metadata=initial)
+    assert calls == ["prepare"]
+    assert list(shared.frames) == list(independent.frames)
+    for sheet_name in shared.frames:
+        pd.testing.assert_frame_equal(shared.frames[sheet_name], independent.frames[sheet_name], check_exact=True)
+    with ZipFile(independent.workbook_path) as before, ZipFile(target) as after:
+        assert before.namelist() == after.namelist()
+        for name in before.namelist():
+            if name != "docProps/core.xml":
+                assert before.read(name) == after.read(name)
+
+    published = target.read_bytes()
+    observed["selection_fingerprint"] = "b" * 64
+    with pytest.raises(RuntimeError, match="harmonic selection changed"):
+        prepare_stats_ready_export(**arguments, save_path=target, initial_selection_metadata=initial)
+    assert target.read_bytes() == published
+
+    def reject_stale_sources(**_kwargs):
+        raise canonical_harmonics.CanonicalHarmonicSelectionError(
+            "Current FullFFT source bytes changed.", reason="stale_full_fft_provenance",
+        )
+
+    monkeypatch.setattr(dv_policies, "load_project_processing_harmonics", reject_stale_sources)
+    with pytest.raises(canonical_harmonics.CanonicalHarmonicSelectionError, match="source bytes changed"):
+        prepare_stats_ready_export(**arguments, save_path=target, initial_selection_metadata=initial)
+    assert target.read_bytes() == published

@@ -228,7 +228,11 @@ their own scope, and nested exports share it. Scope exit discards all retained
 results. Hits still check current project/cohort/settings/ROI identities,
 release decisions and source dependencies, and return detached values.
 Publishing artifact-freshness bookkeeping alone does not invalidate scientific
-selection. Public final-release gates remain mandatory.
+selection. Public final-release gates remain mandatory. The managed Stats-ready
+writer uses its initial verified selection to resolve the workbook policy.
+Summed BCA preparation still independently validates the live neutral FullFFT
+provenance and final release. The writer stops before saving if the selection
+fingerprint used for the workbook differs from the initial selection.
 
 The independent frequency-QC context reuses only successful `current` evidence
 derived from the processing ledger. A scope retains at most one full context

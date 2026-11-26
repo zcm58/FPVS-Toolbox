@@ -1037,7 +1037,9 @@ def test_write_loreta_stats_ready_workbook_uses_project_canonical_rate(tmp_path,
     monkeypatch.setattr(
         workbook_mod,
         "load_project_processing_harmonics",
-        lambda **_kwargs: SimpleNamespace(metadata={"base_frequency_hz": 3.0}),
+        lambda **_kwargs: SimpleNamespace(
+            metadata={"base_frequency_hz": 3.0, "selection_fingerprint": "b" * 64},
+        ),
     )
     monkeypatch.setattr(
         workbook_mod,
@@ -1088,6 +1090,9 @@ def test_write_loreta_stats_ready_workbook_uses_project_canonical_rate(tmp_path,
     assert captured["save_path"] == expected_path
     assert captured["project_root"] == str(tmp_path.resolve())
     assert captured["dv_policy"] is None
+    assert captured["initial_selection_metadata"] == {
+        "base_frequency_hz": 3.0, "selection_fingerprint": "b" * 64,
+    }
     assert logs == ["Scanning processed project workbooks for the LORETA summary report..."]
 
 

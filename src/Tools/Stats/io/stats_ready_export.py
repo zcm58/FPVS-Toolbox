@@ -957,14 +957,26 @@ def prepare_stats_ready_export(
     max_freq: float | None = None,
     selection_conditions: list[str] | None = None,
     project_root: str | None = None,
+    initial_selection_metadata: Mapping[str, object] | None = None,
 ) -> StatsReadyExport:
-    """Prepare and optionally write the external-statistics Summed BCA export."""
+    """Prepare and optionally write the external-statistics Summed BCA export.
+
+    A managed writer that already read the processing selection can supply its
+    metadata for the initial policy. BCA preparation still validates the live
+    FullFFT sources and final release. Publication requires the same selection.
+    """
 
     started_at = perf_counter()
+    initial_fingerprint = None
+    if initial_selection_metadata is not None:
+        initial_fingerprint = initial_selection_metadata.get("selection_fingerprint")
+        if project_root in (None, "") or not isinstance(initial_fingerprint, str) or not initial_fingerprint:
+            raise ValueError("An initial harmonic selection requires a project and a selection fingerprint.")
     resolved_dv_policy = _resolve_stats_ready_dv_policy(
         dv_policy=dv_policy,
         project_root=project_root,
         log_func=log_func,
+        initial_selection_metadata=initial_selection_metadata,
     )
     log_func(
         "Stats-ready export: preparing Summed BCA data "
@@ -992,6 +1004,13 @@ def prepare_stats_ready_export(
     )
     if not summed_bca:
         raise RuntimeError("Stats-ready export could not prepare Summed BCA data.")
+    if initial_fingerprint is not None:
+        used_selection = _common_fixed_predefined_meta(dv_metadata) or _common_group_significant_meta(dv_metadata)
+        if used_selection.get("selection_fingerprint") != initial_fingerprint:
+            raise RuntimeError(
+                "The accepted project harmonic selection changed while preparing the Stats-ready workbook. "
+                "Retry the export with the current selection."
+            )
     included_subjects = [str(subject) for subject in subjects if str(subject) in summed_bca]
     if not included_subjects:
         included_subjects = [str(subject) for subject in summed_bca.keys()]
@@ -1056,20 +1075,20 @@ def _resolve_stats_ready_dv_policy(
     dv_policy: Mapping[str, object] | None,
     project_root: str | None,
     log_func: Callable[[str], None],
+    initial_selection_metadata: Mapping[str, object] | None,
 ) -> Mapping[str, object] | None:
     """Use the accepted processing profile for every managed-project export."""
 
     if project_root in (None, ""):
         return dv_policy
-    from Main_App.processing.canonical_harmonics import (
-        load_project_processing_harmonics,
-    )
+    if initial_selection_metadata is None:
+        from Main_App.processing.canonical_harmonics import load_project_processing_harmonics
 
-    canonical = load_project_processing_harmonics(
-        project_root=project_root,
-        log_func=log_func,
-    )
-    resolved = dv_policy_payload_from_selection_metadata(canonical.metadata)
+        initial_selection_metadata = load_project_processing_harmonics(
+            project_root=project_root,
+            log_func=log_func,
+        ).metadata
+    resolved = dv_policy_payload_from_selection_metadata(initial_selection_metadata)
     log_func(
         "Stats-ready export: using accepted processing-time harmonic profile "
         f"{resolved['harmonic_selection_profile']} "
