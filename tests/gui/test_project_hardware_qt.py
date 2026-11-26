@@ -246,7 +246,10 @@ def test_brain_products_reference_and_channel_controls_fit_1280_by_900_workspace
     qtbot.wait(1)
     assert (window.width(), window.height()) == (1280, 900)
     preproc_page = page.tabs.currentWidget()
-    assert not preproc_page.findChildren(QScrollArea)
+    scroll = preproc_page.findChild(QScrollArea, "settings_category_scroll")
+    assert scroll is not None and scroll.isVisibleTo(window)
+    assert scroll.horizontalScrollBar().maximum() == 0
+    assert scroll.verticalScrollBar().value() == 0
     for control in (
         page.hardware_platform_combo, page.initial_reference_combo, page.preproc_edits[4],
         page.channel_types_edit, page.drop_reference_channels_check,
@@ -257,6 +260,7 @@ def test_brain_products_reference_and_channel_controls_fit_1280_by_900_workspace
             _assert_settings_widget_unclipped(control, window)
     footer = page.findChild(QWidget, "settings_footer")
     assert footer is not None
+    assert not scroll.isAncestorOf(footer)
     for button in footer.findChildren(QPushButton):
         _assert_settings_widget_unclipped(button, window)
 
