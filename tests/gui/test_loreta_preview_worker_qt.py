@@ -338,6 +338,7 @@ def test_source_build_starts_when_opened_and_drains_after_project_reset(
         assert host._loreta_visualizer_page is None
         assert workspace.currentWidget() is home
         assert window._source_export_thread is not None
+        assert window._source_export_worker.cancellation.requested
         with qtbot.waitSignal(window.destroyed, timeout=5000):
             release.set()
         assert cancelled.is_set()

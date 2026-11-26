@@ -5064,30 +5064,39 @@ class LoretaVisualizerWindow(QWidget):
             colors = scalar_colors(signed=payload is not None and source_payload_is_signed(payload), smooth=False)
             self.activation_color_ramp.setStyleSheet(_activation_color_ramp_stylesheet(colors))
 
-    def _finish_deferred_close(self) -> None:
-        if self._closing_requested and not any((
+    def _has_close_workers(self) -> bool:
+        return any((
             self._mesh_thread, self._source_export_thread,
             self._stats_ready_export_thread, self._mri_render_thread, self._source_discovery_thread,
             getattr(self, "_group_comparison_thread", None),
             getattr(self, "_comparison_figure_thread", None),
-        )):
+        ))
+
+    def _finish_deferred_close(self) -> None:
+        if self._closing_requested and not self._has_close_workers():
             self.close()
 
     def retire_from_workspace(self) -> None:
         """Delete this detached page after its last worker drains."""
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.close()
+        if not self._defer_close_for_workers():
+            self.close()
 
-    def closeEvent(self, event) -> None:  # noqa: N802, ANN001
+    def _defer_close_for_workers(self) -> bool:
         self._mri_preview_resize_timer.stop()
         self._mri_drag_active = False
         self._mri_preview_cache = None
-        if any((self._mesh_thread, self._source_export_thread, self._stats_ready_export_thread, self._mri_render_thread, self._source_discovery_thread, self._group_comparison_thread, self._comparison_figure_thread)):
-            self._closing_requested = True
-            self._mri_render_pending = None
-            self._pending_source_map_rebuild = None
-            self._source_discovery_pending = None
-            self._cancel_source_map_build()
+        if not self._has_close_workers():
+            return False
+        self._closing_requested = True
+        self._mri_render_pending = None
+        self._pending_source_map_rebuild = None
+        self._source_discovery_pending = None
+        self._cancel_source_map_build()
+        return True
+
+    def closeEvent(self, event) -> None:  # noqa: N802, ANN001
+        if self._defer_close_for_workers():
             event.ignore()
             return
         self._release_group_comparison_renderer()
