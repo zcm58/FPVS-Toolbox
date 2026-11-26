@@ -112,7 +112,10 @@ Common long-running work:
   `Main_App.workers.kurtosis_review_process`. The background scan classifies
   canonical exclusions and validates approved timing before scheduling eligible
   recordings. The CPU/affinity and current project ceiling bound the pool;
-  initial memory pressure no longer permanently shrinks that ceiling. A drained
+  Auto prepares batches on the qualified built-in route with up to seven workers
+  within its shared RAM and CPU ceiling. Explicit worker limits and other
+  routes retain the shared calculation. Initial memory pressure does not
+  permanently shrink the ceiling. A drained
   executor can shrink or grow with current headroom. A new multi-worker population
   requires a first-fit group of pending recordings whose combined credits, shared
   emergency reserve and worker floors fit both live memory limits. An existing pool

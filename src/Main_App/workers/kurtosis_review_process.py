@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+# Qualified preparation touches source-rate and checkpoint buffers per worker.
+_BUILTIN_PREPARATION_AUTO_CEILING = 7
 _WORKER_CANCEL: Any = None
 _WORKER_MESSAGES: Any = None
 _WORKER_GRANT_EVENTS: Any = None
@@ -205,6 +207,8 @@ def _review_resource_plan(
     if settings is None:
         return _ReviewResourcePlan(max(1, fitted), budget, tuple(credits))
     cap = min(len(raw_file_infos), compute_dynamic_worker_ceiling(max_workers))
+    if max_workers in (None, 0) and builtin_methods and all(estimate is not None for estimate in estimates):
+        cap = min(cap, _BUILTIN_PREPARATION_AUTO_CEILING)
     emergency = max((estimate.emergency_extra_bytes for estimate in estimates if estimate is not None), default=0)
     budget = max(0, int(memory.available) - max(_GIB, int(memory.total) // 16))
     return _ReviewResourcePlan(cap, budget, tuple(credits), tuple(estimates), tuple(exclusive), emergency, True)

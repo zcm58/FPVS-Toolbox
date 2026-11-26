@@ -216,7 +216,8 @@ def test_worker_count_shares_main_cpu_ram_and_override_policy(monkeypatch, cpu, 
 
 
 @pytest.mark.parametrize("total_gib,requested,expected", [
-    (16, None, 4), (32, None, 4), (127, None, 16), (127, 16, 16),
+    (8, None, 1), (16, None, 4), (32, None, 4), (64, None, 7),
+    (127, None, 7), (127, 0, 7), (127, 16, 16), (192, None, 7),
     (16, 12, 12), (32, 12, 12), (16, 2, 2), (32, 2, 2),
 ])
 def test_validated_dynamic_prep_uses_ram_tier_or_project_override(
@@ -236,6 +237,21 @@ def test_validated_dynamic_prep_uses_ram_tier_or_project_override(
     assert plan.dynamic and plan.max_workers == expected
     assert plan.budget_bytes == 12 * GIB - max(GIB, total_gib * GIB // 16)
     assert not any(plan.exclusive)
+
+
+
+@pytest.mark.parametrize("builtin,qualified", [(False, True), (True, False)])
+def test_auto_preparation_retains_shared_ceiling_outside_qualified_path(monkeypatch, builtin, qualified):
+    from Main_App.workers.review_resource_budget import ReviewGeometry
+
+    infos = _resource_model(monkeypatch, cpu=24, total=127 * GIB,
+                            available=112 * GIB, sizes=[20] * 30)
+    monkeypatch.setattr(process_module, "compute_dynamic_worker_ceiling", lambda _requested: 16)
+    monkeypatch.setattr(process_module, "_uses_builtin_review_methods", lambda _settings: builtin)
+    geometry = ReviewGeometry(67, 65, 64, 2_097_152, 2048.0, 256.0, 454_656, 2048)
+    monkeypatch.setattr(process_module, "read_review_geometry", lambda *_args: geometry if qualified else None)
+    plan = process_module._review_resource_plan(infos, settings={})
+    assert plan.max_workers == 16
 
 
 @pytest.mark.parametrize("recovered_gib,expected_population", [(28, 12), (7, 4)])
