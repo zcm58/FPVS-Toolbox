@@ -586,6 +586,142 @@ def test_studio_export_selects_processing_montage_on_reopen(tmp_path, filename, 
     assert resolve_recording_contract(saved).montage_id == montage
 
 
+def test_compiled_studio_cadence_is_retained_separately_from_fft_protocol(tmp_path):
+    source = STUDIO_FIXTURES / "v2-completed-unicorn-60-02.fpvsconfig"
+    source_bytes = source.read_bytes()
+    payload = json.loads(source_bytes)
+    completed = payload["completed_session"]
+    project = create_project_from_fpvs_config(tmp_path / "projects", source)
+    nominal_payload = json.loads(source_bytes)
+    nominal_payload["display"]["preferred_refresh_hz"] = 60.0
+    nominal_payload["completed_session"]["refresh_hz"] = 60.0
+    nominal_path = tmp_path / "nominal.fpvsconfig"
+    nominal_path.write_text(json.dumps(nominal_payload), encoding="utf-8")
+    nominal = read_fpvs_config(nominal_path)
+    assert project.frequency_protocol.presentation_rate_hz == 6
+    assert float(project.frequency_protocol.oddball_rate_hz) == 1.2
+    assert project.frequency_protocol.fingerprint == nominal.frequency_protocol.fingerprint
+    receipt = project.manifest["tools"]["studio_import"]
+    expected_schedule = {
+        "frames_per_stimulus": 10, "frames_per_oddball": 50,
+        "base_hz": 6.002, "oddball_hz": 1.2004,
+    }
+    assert receipt["presentation_cadence"] == {
+        "requested_base_hz": 6.0,
+        "requested_oddball_hz": 1.2,
+        "configured_refresh_hz": 60.02,
+        "compiled_refresh_hz": 60.02,
+        "compiled_run_count": 1,
+        "completed_run_count": 1,
+        "compiled_schedule": expected_schedule,
+    }
+    provenance = json.loads((project.project_root / receipt["provenance_file"]).read_bytes())
+    assert provenance["handoff"]["display"] == payload["display"]
+    assert provenance["handoff"]["completed_session"] == completed
+    assert provenance["presentation_cadence"]["compiled_runs"] == [{
+        **{key: completed["ordered_runs"][0][key] for key in ("run_id", "condition_id", "condition_name")},
+        **expected_schedule,
+    }]
+    assert not project.recordings
+    project.save()
+    reloaded = Project.load(project.project_root)
+    assert reloaded.manifest["tools"]["studio_import"] == receipt
+    assert reloaded.frequency_protocol.fingerprint == nominal.frequency_protocol.fingerprint
+    assert source.read_bytes() == source_bytes
+    message = fpvs_config_import_message(reloaded)
+    assert "60.02 Hz is approximate for a nominal 60 Hz FPVS protocol" in message
+    assert "software bench observed about 37 ms" in message
+    assert "0.0004 Hz above the nominal" in message
+    assert "markers recorded in the EEG file" in message
+    assert "compiled frame schedule gives 6.002 Hz base and 1.2004 Hz oddball" in message
+    assert "standard FFT uses the requested 6 Hz base and 1.2 Hz oddball" in message
+
+
+def test_studio_setup_cadence_is_an_estimate_and_keeps_nominal_target(tmp_path):
+    source = tmp_path / "configured.fpvsconfig"
+    payload = _write_handoff_v2(source)
+    payload["protocol"] = {"base_hz": 6.0, "oddball_every_n": 5}
+    payload["display"] = {"preferred_refresh_hz": 60.02}
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", source)
+    cadence = project.manifest["tools"]["studio_import"]["presentation_cadence"]
+    assert cadence["configured_refresh_hz"] == 60.02
+    assert cadence["configured_schedule"]["oddball_hz"] == 1.2004
+    assert "compiled_refresh_hz" not in cadence
+    assert float(project.frequency_protocol.oddball_rate_hz) == 1.2
+    message = fpvs_config_import_message(project)
+    assert "60.02 Hz is approximate" in message
+    assert "estimated frame schedule" in message
+
+
+def test_compiled_studio_cadence_uses_completed_refresh_and_reports_partial_run_coverage(tmp_path):
+    source = tmp_path / "partial-cadence.fpvsconfig"
+    payload = json.loads((STUDIO_FIXTURES / "v2-completed-unicorn-60-02.fpvsconfig").read_bytes())
+    payload["display"]["preferred_refresh_hz"] = 60.0
+    completed = payload["completed_session"]
+    first_run = completed["ordered_runs"][0]
+    second_run = {**first_run, "run_id": "run-without-schedule", "trigger_events": []}
+    completed["ordered_runs"].append(second_run)
+    evidence_runs = completed["acquisition_evidence"]["runs"]
+    evidence_runs.append({**evidence_runs[0], "run_id": second_run["run_id"]})
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", source)
+    receipt = project.manifest["tools"]["studio_import"]
+    cadence = receipt["presentation_cadence"]
+    assert cadence["configured_refresh_hz"] == 60.0
+    assert cadence["compiled_refresh_hz"] == 60.02
+    assert cadence["compiled_schedule"]["oddball_hz"] == 1.2004
+    assert cadence["compiled_run_count"] == 1
+    assert cadence["completed_run_count"] == 2
+    assert "1.2004 Hz oddball for 1 of 2 runs" in fpvs_config_import_message(project)
+    provenance = json.loads((project.project_root / receipt["provenance_file"]).read_bytes())
+    assert provenance["presentation_cadence"]["configured_schedule"]["oddball_hz"] == 1.2
+    assert [
+        run["run_id"] for run in provenance["presentation_cadence"]["compiled_runs"]
+    ] == [first_run["run_id"]]
+
+
+@pytest.mark.parametrize("issue", ["missing", "wrong_gap", "wrong_code", "unknown_condition"])
+def test_completed_studio_cadence_requires_matching_planned_frames(tmp_path, issue):
+    source = tmp_path / "incomplete-cadence.fpvsconfig"
+    payload = json.loads((STUDIO_FIXTURES / "v2-completed-unicorn-60-02.fpvsconfig").read_bytes())
+    # Older completed configurations can lack an acquisition evidence block.
+    del payload["completed_session"]["acquisition_evidence"]
+    run = payload["completed_session"]["ordered_runs"][0]
+    if issue == "missing":
+        del run["trigger_events"]
+    elif issue == "wrong_gap":
+        run["trigger_events"][2]["frame_index"] += 1
+    elif issue == "wrong_code":
+        run["trigger_events"][2]["code"] = 56
+    else:
+        run["condition_id"] = "unknown"
+    payload["display"]["preferred_refresh_hz"] = 60.0
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", source)
+    cadence = project.manifest["tools"]["studio_import"]["presentation_cadence"]
+    assert cadence["configured_refresh_hz"] == 60.0
+    assert cadence["compiled_refresh_hz"] == 60.02
+    assert "compiled_schedule" not in cadence
+    assert "configured_schedule" not in cadence
+    message = fpvs_config_import_message(project)
+    assert "60.02 Hz is approximate" in message
+    assert "compiled frame schedule" not in message
+
+
+def test_completed_studio_warning_uses_compiled_refresh_even_if_configured_differs(tmp_path):
+    source = tmp_path / "compiled-60.fpvsconfig"
+    payload = json.loads((STUDIO_FIXTURES / "v2-completed-unicorn-60-02.fpvsconfig").read_bytes())
+    payload["completed_session"]["refresh_hz"] = 60.0
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    project = create_project_from_fpvs_config(tmp_path / "projects", source)
+    assert "60.02 Hz is approximate" not in fpvs_config_import_message(project)
+
+
 def test_historical_completed_producer_shape_imports_without_version_block(tmp_path):
     payload = json.loads((STUDIO_FIXTURES / "v2-completed-biosemi.fpvsconfig").read_text(encoding="utf-8"))
     for field in ("format", "format_version", "kind", "metadata"):

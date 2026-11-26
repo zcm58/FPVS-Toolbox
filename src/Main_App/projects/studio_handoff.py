@@ -7,10 +7,13 @@ Authoring/runtime details are retained as evidence, never interpreted as EEG.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from fractions import Fraction
+from itertools import pairwise
+from math import floor, isfinite
 from typing import Any
 
 from Main_App.projects.hardware import (
@@ -234,6 +237,142 @@ def normalize_studio_handoff(payload: Mapping[str, Any]) -> dict[str, Any]:
     _validate_completion(data, strict=current)
     studio_recording_selection(data)
     return data
+
+
+def studio_presentation_cadence(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Derive configured and compiled cadence without interpreting callback or EEG time."""
+
+    cadence: dict[str, Any] = {}
+    display = data.get("display")
+    configured_refresh = (
+        _optional_cadence_rate(display.get("preferred_refresh_hz"))
+        if isinstance(display, Mapping) else None
+    )
+    if configured_refresh is not None:
+        cadence["configured_refresh_hz"] = float(configured_refresh)
+    completed = data.get("completed_session")
+    compiled_refresh = (
+        _optional_cadence_rate(completed.get("refresh_hz"))
+        if isinstance(completed, Mapping) else None
+    )
+    if compiled_refresh is not None:
+        cadence["compiled_refresh_hz"] = float(compiled_refresh)
+
+    protocol = data.get("protocol")
+    if not isinstance(protocol, Mapping):
+        return cadence
+    base = _optional_cadence_rate(protocol.get("base_hz"))
+    every = protocol.get("oddball_every_n")
+    if base is None or type(every) is not int or every < 1:
+        return cadence
+
+    cadence.update({
+        "requested_base_hz": float(base),
+        "requested_oddball_hz": float(base / every),
+    })
+    if configured_refresh is not None:
+        frames = _studio_frames_per_stimulus(configured_refresh, base)
+        if frames is not None:
+            cadence["configured_schedule"] = _cadence_for_frames(configured_refresh, frames, every)
+
+    if compiled_refresh is None or not isinstance(completed, Mapping):
+        return cadence
+    expected_frames = _studio_frames_per_stimulus(compiled_refresh, base)
+    runs = completed.get("ordered_runs")
+    if expected_frames is None or not isinstance(runs, list):
+        return cadence
+
+    conditions = {
+        condition.get("condition_id"): condition
+        for condition in data["conditions"]
+        if isinstance(condition.get("condition_id"), str)
+    }
+    triggers = data.get("triggers", {})
+    if not isinstance(triggers, Mapping):
+        return cadence
+    oddball_code = triggers.get("oddball_trigger_code", 55)
+    compiled_schedule = _cadence_for_frames(compiled_refresh, expected_frames, every)
+    run_ids = Counter(
+        run["run_id"] for run in runs
+        if isinstance(run, Mapping) and isinstance(run.get("run_id"), str)
+    )
+    compiled_runs = []
+    for run in runs:
+        if not isinstance(run, Mapping):
+            continue
+        run_id, condition_id = run.get("run_id"), run.get("condition_id")
+        if not isinstance(run_id, str) or not run_id or run_ids[run_id] != 1:
+            continue
+        condition = conditions.get(condition_id) if isinstance(condition_id, str) else None
+        if condition is None or run.get("condition_name") != condition.get("name"):
+            continue
+        if _has_regular_studio_oddballs(run, oddball_code, expected_frames, every):
+            compiled_runs.append({
+                "run_id": run_id,
+                "condition_id": condition_id,
+                "condition_name": condition["name"],
+                **compiled_schedule,
+            })
+    if compiled_runs:
+        cadence["completed_run_count"] = len(runs)
+        cadence["compiled_runs"] = compiled_runs
+    return cadence
+
+
+def _optional_cadence_rate(value: Any) -> Fraction | None:
+    if value is None:
+        return None
+    try:
+        rate = _rate(value, "Studio cadence")
+        as_float = float(rate)
+        return rate if isfinite(as_float) and as_float > 0 else None
+    except (ValueError, OverflowError):
+        return None
+
+
+def _studio_frames_per_stimulus(refresh: Fraction, base: Fraction) -> int | None:
+    # Match Studio's rounding for its native regular stream. A shorter
+    # requested period cannot show one complete stimulus on this display.
+    ratio = refresh / base
+    if ratio < 1 - Fraction(1, 1_000_000):
+        return None
+    return floor(ratio + Fraction(1, 2))
+
+
+def _cadence_for_frames(refresh: Fraction, frames: int, every: int) -> dict[str, Any]:
+    oddball_frames = frames * every
+    return {
+        "frames_per_stimulus": frames,
+        "frames_per_oddball": oddball_frames,
+        "base_hz": float(refresh / frames),
+        "oddball_hz": float(refresh / oddball_frames),
+    }
+
+
+def _has_regular_studio_oddballs(
+    run: Mapping[str, Any],
+    oddball_code: Any,
+    frames: int,
+    every: int,
+) -> bool:
+    events = run.get("trigger_events")
+    if not isinstance(events, list):
+        return False
+    oddballs = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            return False
+        if event.get("label") != "oddball_onset":
+            continue
+        frame, code = event.get("frame_index"), event.get("code")
+        if type(frame) is not int or frame < 0 or type(code) is not int or code != oddball_code:
+            return False
+        oddballs.append(frame)
+    return (
+        len(oddballs) >= 2
+        and oddballs[0] == (every - 1) * frames
+        and all(right - left == every * frames for left, right in pairwise(oddballs))
+    )
 
 
 def _validate_protocol_semantics(data: Mapping[str, Any], *, strict: bool) -> None:
