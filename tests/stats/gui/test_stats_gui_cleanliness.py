@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QListWidget, QWidget, QPushButton, QTabWidget  # noqa: E402
 
@@ -75,10 +74,15 @@ def test_stats_gui_cleanliness_layout_and_copy(qtbot, tmp_path):
 
     window.summary_text.setPlainText("Summary content")
     assert window.summary_text.isVisible()
+    assert window.results_toggle_btn.isChecked()
     window.log_text.setPlainText("Log content")
 
     clipboard = QGuiApplication.clipboard()
+    clipboard.clear()
+    button = window.copy_summary_btn
+    assert button.isVisibleTo(window)
+    assert button.isEnabled()
 
-    qtbot.mouseClick(window.copy_summary_btn, Qt.LeftButton)
-    assert clipboard.text() == "Summary content"
+    button.click()
+    qtbot.waitUntil(lambda: clipboard.text() == "Summary content")
     assert not hasattr(window, "copy_log_btn")

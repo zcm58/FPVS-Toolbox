@@ -9,8 +9,8 @@ import pytest
 if importlib.util.find_spec("PySide6") is None or importlib.util.find_spec("pytestqt") is None:
     pytest.skip("PySide6 or pytest-qt not available", allow_module_level=True)
 
-from PySide6.QtCore import QPoint, QSize, Signal, Qt
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import QEvent, QPoint, QSize, Signal, Qt
+from PySide6.QtGui import QAction, QIcon, QMouseEvent
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -380,6 +380,8 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     file_actions = _menu(win, "fileMenu").actions()
     assert [None if action.isSeparator() else action.text() for action in file_actions] == [
         "Import FPVS Studio Config…",
+        "Review Studio Cohort…",
+        "Share study results…",
         "Open Existing Project…",
         "Create Project Manually…",
         "Save Project Settings",
@@ -586,29 +588,42 @@ def test_workspace_menu_mouse_hover_is_visible_without_opening_or_triggering(
     triggered = QSignalSpy(bar.triggered)
     opened = [QSignalSpy(action.menu().aboutToShow) for action in actions]
 
+    def move_on_menu(position):
+        # Qt's menu bar ignores mouse moves synthesized from touch. Deliver
+        # an ordinary pointer event even on CI's offscreen platform.
+        event = QMouseEvent(
+            QEvent.Type.MouseMove, position, position, bar.mapToGlobal(position),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier, Qt.MouseEventSource.MouseEventNotSynthesized,
+        )
+        QApplication.sendEvent(bar, event)
+
     blank = QPoint(bar.width() - 12, bar.height() // 2)
-    QTest.mouseMove(bar, blank, delay=10)
-    qtbot.wait(40)
+    move_on_menu(blank)
+    assert bar.activeAction() is None
     idle_images = [_menu_action_image(bar, action) for action in actions]
     for index, action in enumerate(actions):
-        QTest.mouseMove(bar, bar.actionGeometry(action).center(), delay=10)
-        qtbot.waitUntil(lambda: _menu_action_image(bar, action) != idle_images[index])
+        move_on_menu(bar.actionGeometry(action).center())
+        assert bar.activeAction() is action
+        assert _menu_action_image(bar, action) != idle_images[index]
         if index:
-            qtbot.waitUntil(lambda: _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1])
+            assert _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1]
         assert not any(candidate.menu().isVisible() for candidate in actions)
 
     assert triggered.count() == 0
     assert all(spy.count() == 0 for spy in opened)
-    QTest.mouseMove(bar, blank, delay=10)
-    qtbot.waitUntil(lambda: all(
+    move_on_menu(blank)
+    assert bar.activeAction() is None
+    assert all(
         _menu_action_image(bar, action) == image
         for action, image in zip(actions, idle_images)
-    ))
+    )
 
-    QTest.mouseMove(bar, bar.actionGeometry(actions[0]).center(), delay=10)
-    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) != idle_images[0])
-    QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
-    qtbot.waitUntil(lambda: _menu_action_image(bar, actions[0]) == idle_images[0])
+    move_on_menu(bar.actionGeometry(actions[0]).center())
+    assert _menu_action_image(bar, actions[0]) != idle_images[0]
+    QApplication.sendEvent(bar, QEvent(QEvent.Type.Leave))
+    assert bar.activeAction() is None
+    assert _menu_action_image(bar, actions[0]) == idle_images[0]
 
 
 def test_workspace_menu_popup_and_keyboard_keep_native_navigation(

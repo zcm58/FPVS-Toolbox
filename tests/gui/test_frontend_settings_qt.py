@@ -110,8 +110,11 @@ def test_settings_category_rail_groups_navigation_and_aligns_the_headings(panel)
     assert sidebar.width() < panel.tabs.width()
     assert sidebar.mapTo(panel, sidebar.rect().topRight()).x() < title.mapTo(panel, QPoint()).x()
 
-    panel.tabs.setCurrentIndex(panel.tabs.count() - 1)
-    assert title.text() == "Application"
+    application_index = next(
+        index for index in range(panel.tabs.count()) if panel.tabs.tabText(index) == "Application"
+    )
+    panel.tabs.setCurrentIndex(application_index)
+    assert navigation.currentItem().text() == title.text() == "Application"
     heading = sidebar.findChild(QLabel, "settings_sidebar_title")
     assert heading is not None
     assert heading.mapTo(panel, QPoint()).y() == title.mapTo(panel, QPoint()).y()
@@ -172,7 +175,7 @@ def test_settings_reduced_motion_keeps_keyboard_selection_immediate(panel, qtbot
     qtbot.keyClick(navigation, Qt.Key.Key_End)
 
     assert panel.tabs.currentIndex() == panel.tabs.count() - 1
-    assert panel.settings_page_title.text() == "Application"
+    assert navigation.currentItem().text() == panel.settings_page_title.text() == "Diagnostics"
     assert navigation.currentRow() == navigation._indicator_row == panel.tabs.currentIndex()
     assert navigation._indicator_animation.state() == QAbstractAnimation.State.Stopped
     assert navigation.hasFocus()
@@ -215,7 +218,9 @@ def test_application_appearance_uses_shared_save_and_cancel(panel, monkeypatch, 
 
     apply_appearance = Mock()
     monkeypatch.setattr(settings_panel, "set_appearance_mode", apply_appearance)
-    panel.tabs.setCurrentIndex(panel.tabs.count() - 1)
+    navigation = panel.settings_navigation
+    (application_item,) = navigation.findItems("Application", Qt.MatchFlag.MatchExactly)
+    navigation.setCurrentItem(application_item)
     combo = panel.appearance_mode_combo
     assert combo.isVisibleTo(panel)
     assert [combo.itemText(index) for index in range(combo.count())] == ["Light", "Dark", "Auto"]

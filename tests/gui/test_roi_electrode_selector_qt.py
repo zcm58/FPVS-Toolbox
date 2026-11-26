@@ -67,7 +67,10 @@ def test_embedded_editor_is_flat_accessible_visual_first_surface(qtbot):
     assert editor.map_pane.geometry().right() < editor.roi_pane.geometry().left()
     assert editor.map_pane.isVisibleTo(editor)
     assert editor.roi_list.isVisibleTo(editor)
-    assert editor.findChildren(QScrollArea) == []
+    assert editor.findChildren(QScrollArea) == [editor.map_scroll]
+    assert editor.map_scroll.parentWidget() is editor.map_pane
+    assert editor.map_scroll.widget() is editor.map_widget
+    assert editor.map_scroll.focusPolicy() == Qt.FocusPolicy.NoFocus
     assert editor.findChildren(QComboBox) == []
     assert editor.findChildren(QLineEdit) == [editor.name_edit]
     assert editor.montage_label.text() == "Montage: BioSemi 64"
@@ -97,9 +100,8 @@ def test_embedded_editor_is_flat_accessible_visual_first_surface(qtbot):
     assert editor.findChild(QPushButton, "settings_rois_add_preset") is None
     assert editor.findChild(QPushButton, "settings_rois_save_custom_presets") is None
 
-    actions = editor.roi_pane.layout().itemAt(2).layout()
-    assert actions is not None
-    assert actions.indexOf(editor.clear_button) < actions.indexOf(editor.remove_button)
+    assert editor.name_edit.geometry().bottom() < editor.clear_button.geometry().top()
+    assert editor.clear_button.geometry().right() < editor.remove_button.geometry().left()
     assert editor.clear_button.property("variant") == "secondary"
     assert editor.remove_button.property("variant") == "danger"
     assert editor.add_button.property("variant") == "secondary"
@@ -121,10 +123,10 @@ def test_embedded_editor_is_flat_accessible_visual_first_surface(qtbot):
     QTest.keyClick(editor.add_button, Qt.Key.Key_Tab)
     assert editor.roi_list.hasFocus()
     QTest.keyClick(editor.roi_list, Qt.Key.Key_Tab)
-    assert editor.clear_button.hasFocus()
-    QTest.keyClick(editor.clear_button, Qt.Key.Key_Tab)
     assert editor.name_edit.hasFocus()
     QTest.keyClick(editor.name_edit, Qt.Key.Key_Tab)
+    assert editor.clear_button.hasFocus()
+    QTest.keyClick(editor.clear_button, Qt.Key.Key_Tab)
     assert buttons["Fp1"].hasFocus()
 
 
@@ -139,9 +141,9 @@ def test_custom_roi_tab_order_includes_removal_and_legacy_controls(qtbot):
     editor.add_button.setFocus()
     expected_chain = (
         editor.roi_list,
+        editor.name_edit,
         editor.clear_button,
         editor.remove_button,
-        editor.name_edit,
         editor.unmapped_list,
         editor.remove_unmapped_button,
         editor.map_widget.electrode_buttons["Fp1"],

@@ -710,6 +710,7 @@ def test_settings_dialog_uses_shared_component_layer(tmp_path, qtbot, monkeypatc
         "Quality Control",
         "Experimental",
         "Application",
+        "Diagnostics",
     ]
     assert "General" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert "Oddball" not in [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
@@ -2635,7 +2636,9 @@ def test_parallel_worker_ceiling_saves_without_ram_tier_confirmation(tmp_path, q
     reloaded = Project.load(project.project_root)
     assert reloaded.preprocessing["max_parallel_workers_override"] == 6
     assert prompts == []
-    assert "live RAM" in dlg.preproc_edits[8].toolTip()
+    tooltip = dlg.preproc_edits[8].toolTip()
+    assert "project ceiling" in tooltip
+    assert "available memory can reduce" in tooltip
 
 
 def test_parallel_worker_zero_retains_automatic_setting(tmp_path, qtbot, monkeypatch):

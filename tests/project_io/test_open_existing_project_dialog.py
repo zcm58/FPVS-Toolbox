@@ -229,7 +229,11 @@ def test_import_fpvs_config_project_from_file_menu(tmp_path, main_window, monkey
     assert manifest["preprocessing"]["hardware_confirmed"] is True
     assert main_window.currentProject.preprocessing["hardware_platform"] == platform
     assert main_window.workspace_stack.currentWidget() is main_window.homeWidget
-    assert not message_spy["info"]
+    assert message_spy["info"] == [
+        ("Project Created", "Created project 'Semantic Categories' with 2 condition(s)."),
+    ]
+    assert not message_spy["warning"]
+    assert not message_spy["critical"]
 
 
 @pytest.mark.parametrize("selected_index", [0, 1])

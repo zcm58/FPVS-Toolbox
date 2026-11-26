@@ -120,6 +120,8 @@ def test_live_appearance_updates_existing_widgets_and_menus(qtbot, qapp) -> None
         assert window.styleSheet() != local_style
         assert theme_color(SURFACE_BG).name().upper() in window.styleSheet()
         assert "chevron-down-dark.svg" in qapp.styleSheet()
+        menu.ensurePolished()
+        qtbot.waitUntil(lambda: menu.palette().color(QPalette.Window) == theme_color(PAGE_BG))
 
         fusion_style = qapp.style()
         set_appearance_mode(qapp, "Dark")
@@ -136,6 +138,7 @@ def test_live_appearance_updates_existing_widgets_and_menus(qtbot, qapp) -> None
         assert qapp.palette().color(QPalette.Window) == QColor(PAGE_BG)
         assert window.styleSheet() == local_style
         assert "chevron-down-dark.svg" not in qapp.styleSheet()
+        qtbot.waitUntil(lambda: menu.palette().color(QPalette.Window) == QColor(PAGE_BG))
 
         set_appearance_mode(qapp, "Auto")
         hints = qapp.styleHints()
@@ -147,7 +150,6 @@ def test_live_appearance_updates_existing_widgets_and_menus(qtbot, qapp) -> None
             expected = QColor(resolve_ui_color(PAGE_BG, dark=dark))
             qtbot.waitUntil(lambda: qapp.palette().color(QPalette.Window) == expected)
             assert (window.styleSheet() != local_style) is dark
-            menu.ensurePolished()
-            assert menu.palette().color(QPalette.Window) == QColor(resolve_ui_color(SURFACE_BG, dark=dark))
+            qtbot.waitUntil(lambda: menu.palette().color(QPalette.Window) == expected)
     finally:
         apply_light_palette(qapp)

@@ -83,7 +83,8 @@ def test_rm_anova_result_and_reset(qtbot) -> None:
 
     assert page.analysis_combo.currentIndex() == page.PAIRED_TEST
     assert page.sample_size_spin.value() == 24
-    assert page.result_banner.text() == "No result yet."
+    assert page.result_banner.text() == "Set the assumptions and select Calculate."
+    assert not page.result_details.isVisibleTo(page)
 
 
 def test_fpvs_design_inputs_derive_repeated_measurements(qtbot) -> None:
@@ -144,9 +145,8 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         page.reset_defaults()
         page.calculate()
         change()
-        assert page.result_banner.text() == (
-            "No result yet."
-        )
+        assert page.result_banner.text() == "Set the assumptions and select Calculate."
+        assert not page.result_details.isVisibleTo(page)
 
     rm_changes = (
         (lambda: None, lambda: page.correlation_spin.setValue(0.60)),
@@ -166,9 +166,8 @@ def test_result_affecting_inputs_clear_stale_output(qtbot) -> None:
         setup()
         page.calculate()
         change()
-        assert page.result_banner.text() == (
-            "No result yet."
-        )
+        assert page.result_banner.text() == "Set the assumptions and select Calculate."
+        assert not page.result_details.isVisibleTo(page)
 
 
 def test_one_sided_choice_shows_directional_warning(qtbot) -> None:
@@ -183,7 +182,7 @@ def test_one_sided_choice_shows_directional_warning(qtbot) -> None:
     qtbot.mouseClick(page.calculate_button, Qt.LeftButton)
 
     assert page.assumption_guidance.isVisibleTo(page)
-    assert page.result_banner.text() != "No result yet."
+    assert page.result_details.isVisibleTo(page)
 
 
 def test_calculation_error_clears_previous_result(qtbot) -> None:
