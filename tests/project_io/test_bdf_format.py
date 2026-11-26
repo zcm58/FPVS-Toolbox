@@ -8,7 +8,7 @@ import mne
 import numpy as np
 import pytest
 
-from Main_App.io.bdf_format import BdfFormatError, inspect_bdf_format
+from Main_App.io.bdf_format import BdfFormatError, count_bdf_status_transitions, inspect_bdf_format
 from tests.bdf_factory import write_bdf
 
 
@@ -27,6 +27,66 @@ def test_classic_native_samples_and_signed_scaling_are_preserved(tmp_path):
     with mne.io.read_raw_bdf(path, preload=False, verbose=False) as raw:
         assert raw.info["sfreq"] == 250
         np.testing.assert_allclose(raw.get_data(picks=["Fz"])[0], np.array(values) * 1e-6)
+
+
+def _status_transitions(path, **overrides):
+    geometry = {"stim_channel": "Status", "expected_samples": 12,
+                "expected_record_samples": 4, "expected_record_bytes": 24}
+    return count_bdf_status_transitions(path, **(geometry | overrides))
+
+
+def test_status_probe_counts_full_packed_changes_and_record_boundaries(tmp_path, monkeypatch):
+    values = [[0, 1, 1, 1], [1, 1 + 2**17, 1, 0], [-8388608, -8388608, 8388607, 8388607]]
+    path = write_bdf(tmp_path / "status.bdf", variant="BDF", record_onsets=("0", "1", "2"),
+                     samples_per_record=4, signal_values={"Status": values})
+    with mne.io.read_raw_bdf(path, preload=False, stim_channel="Status", verbose=False) as raw:
+        native_events = mne.find_events(raw, stim_channel="Status", shortest_event=1, verbose=False)
+    reads = []
+    real_open = Path.open
+
+    @contextmanager
+    def track_reads(current, *args, **kwargs):
+        with real_open(current, *args, **kwargs) as stream:
+            original_read = stream.read
+
+            def record_read(size):
+                reads.append((stream.tell(), size))
+                return original_read(size)
+
+            assert kwargs.get("buffering") == 0
+            stream.read = record_read
+            yield stream
+
+    monkeypatch.setattr(Path, "open", track_reads)
+    raw_transitions = _status_transitions(path)
+    assert raw_transitions == 6
+    assert len(native_events) <= raw_transitions + 1
+    assert reads == [(0, 256), (256, 512), (780, 12), (804, 12), (828, 12)]
+
+
+@pytest.mark.parametrize("overrides", [{"stim_channel": "status"}, {"expected_samples": 13},
+                                       {"expected_record_samples": 5}, {"expected_record_bytes": 36}])
+def test_status_probe_requires_exact_geometry_and_label(tmp_path, overrides):
+    path = write_bdf(tmp_path / "status.bdf", variant="BDF", record_onsets=("0", "1", "2"),
+                     samples_per_record=4, signal_values={"Status": [[4, 4, 4, 4]] * 3})
+    assert _status_transitions(path) == 0
+    assert _status_transitions(path, **overrides) is None
+
+
+def test_status_probe_rejects_annotations_and_truncated_source(tmp_path):
+    annotated = write_bdf(tmp_path / "annotated.bdf", samples_per_record=4)
+    assert _status_transitions(annotated) is None
+    truncated = write_bdf(tmp_path / "truncated.bdf", variant="BDF", samples_per_record=4)
+    truncated.write_bytes(truncated.read_bytes()[:-1])
+    with pytest.raises(BdfFormatError, match="truncated samples"):
+        _status_transitions(truncated)
+
+
+def test_status_probe_returns_no_partial_count_on_cancellation(tmp_path):
+    path = write_bdf(tmp_path / "cancel.bdf", variant="BDF", record_onsets=("0", "1", "2"),
+                     samples_per_record=4, signal_values={"Status": [[0, 1, 2, 3]] * 3})
+    cancel_checks = iter((False, False, True))
+    assert _status_transitions(path, should_cancel=lambda: next(cancel_checks)) is None
 
 
 def test_bdf_plus_preserves_fractional_origin_tal_order_and_notes(tmp_path):
@@ -158,8 +218,8 @@ def test_header_supports_scientific_decimal_notation_without_rounding(tmp_path):
 
 
 def _matching_replacement_files(tmp_path):
-    path = write_bdf(tmp_path / "original.bdf", record_onsets=("0",))
-    replacement = write_bdf(tmp_path / "replacement.bdf", record_onsets=("0",),
+    path = write_bdf(tmp_path / "original.bdf", variant="BDF", record_onsets=("0",))
+    replacement = write_bdf(tmp_path / "replacement.bdf", variant="BDF", record_onsets=("0",),
                             signal_values={"Fz": [[1] * 250]})
     original_stat = path.stat()
     os.utime(replacement, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
@@ -186,7 +246,8 @@ def test_replacement_between_path_stat_and_open_is_rejected_and_handle_closed(tm
     assert len(opened) == 1 and opened[0].closed
 
 
-def test_path_replacement_after_read_is_rejected_even_when_size_and_mtime_match(tmp_path, monkeypatch):
+@pytest.mark.parametrize("status_only", [False, True])
+def test_path_replacement_after_read_is_rejected_even_when_size_and_mtime_match(tmp_path, monkeypatch, status_only):
     path, replacement = _matching_replacement_files(tmp_path)
     original_open = Path.open
     opened = []
@@ -201,8 +262,12 @@ def test_path_replacement_after_read_is_rejected_even_when_size_and_mtime_match(
             os.replace(replacement, path)
 
     monkeypatch.setattr(Path, "open", replacing_open)
-    with pytest.raises(BdfFormatError, match="changed during inspection"):
-        inspect_bdf_format(path)
+    if status_only:
+        with pytest.raises(BdfFormatError, match="changed while reading Status"):
+            _status_transitions(path, expected_samples=250, expected_record_samples=250, expected_record_bytes=1500)
+    else:
+        with pytest.raises(BdfFormatError, match="changed during inspection"):
+            inspect_bdf_format(path)
     assert len(opened) == 1 and opened[0].closed
 
 

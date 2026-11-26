@@ -103,6 +103,83 @@ def test_other_channels_use_direct_native_without_unspecified_slots(source, adap
         native.close()
 
 
+def test_strict_read_rebases_picked_status_and_rejects_wide_output(source, adapter):
+    assert candidate.supports_bounded_bdf_status(source, stim_channel="Status")
+    with _lazy(source) as native, _lazy(source) as raw:
+        for item in (native, raw):
+            item.pick(["Cz", "Status"])
+            item.rename_channels({"Cz": "Scalp"})
+        expected = native.get_data(picks=["Status"], verbose=False)
+        with candidate.owned_bdf_lazy_read(raw, stim_channel="Status", require_bounded_status=True):
+            actual = raw.get_data(picks=["Status"], verbose=False)
+            with pytest.raises(candidate.BoundedBdfStatusReadError, match="exceeded the admitted Status selection"):
+                raw.get_data(picks=["Scalp", "Status"], verbose=False)
+        assert actual.tobytes() == expected.tobytes()
+        assert pickle.dumps(vars(raw), protocol=5) == pickle.dumps(vars(native), protocol=5)
+
+
+def test_unqualified_strict_read_fails_before_yield(source, adapter, monkeypatch):
+    with _lazy(source) as raw:
+        monkeypatch.setattr(candidate, "_warning_free_header", lambda *_a, **_kw: False)
+        assert not candidate.supports_bounded_bdf_status(source, stim_channel="Status")
+        with pytest.raises(candidate.BoundedBdfStatusReadError, match="could not enforce"):
+            with candidate.owned_bdf_lazy_read(raw, stim_channel="Status", require_bounded_status=True):
+                pytest.fail("A narrow memory budget must not run the native wide read.")
+        assert "_read_segment" not in vars(raw)
+
+
+def test_cold_bids_strict_status_preserves_publication_bytes_and_warm_reuse(tmp_path, adapter, monkeypatch):
+    from Main_App.io.bids_import import prepare_bids_recording
+
+    source = _write(tmp_path / "status.bdf", samples=(32,) * 4, duration=1)
+    native, bounded = tmp_path / "native", tmp_path / "bounded"
+    native.mkdir()
+    bounded.mkdir()
+    with monkeypatch.context() as overrides:
+        overrides.setattr(candidate, "_warning_free_header", lambda *_a, **_kw: False)
+        baseline = prepare_bids_recording(source, project_root=native)
+    explicit = {"_fpvs_preflight_bounded_status": True}
+    bounded_import = prepare_bids_recording(source, project_root=bounded, settings=explicit)
+    assert bounded_import.import_key == baseline.import_key
+    assert bounded_import.manifest_path.read_bytes() == baseline.manifest_path.read_bytes()
+    assert {path.relative_to(baseline.dataset_root): path.read_bytes()
+            for path in baseline.dataset_root.rglob("*") if path.is_file()} == {
+                path.relative_to(bounded_import.dataset_root): path.read_bytes()
+                for path in bounded_import.dataset_root.rglob("*") if path.is_file()
+            }
+    with monkeypatch.context() as overrides:
+        overrides.setattr(candidate, "_warning_free_header", lambda *_a, **_kw: False)
+        reused = prepare_bids_recording(source, project_root=bounded, settings=explicit)
+        assert reused.reused and reused.manifest_path == bounded_import.manifest_path
+        another = tmp_path / "unqualified"
+        another.mkdir()
+        with pytest.raises(candidate.BoundedBdfStatusReadError, match="could not enforce"):
+            prepare_bids_recording(source, project_root=another, settings=explicit)
+
+
+def test_narrow_status_reader_uses_one_private_row_and_full_record_geometry(source, adapter, monkeypatch):
+    with _lazy(source) as raw:
+        original = candidate._read_one_status_row
+        captured = []
+
+        def observe(native, *args):
+            def one_row(data, idx, fi, start, stop, extra, filename, cals, mult):
+                captured.append(extra)
+                assert idx == slice(0, 1)
+                return native(data, idx, fi, start, stop, extra, filename, cals, mult)
+
+            return original(one_row, *args)
+
+        monkeypatch.setattr(candidate, "_read_one_status_row", observe)
+        before = pickle.dumps(raw._raw_extras, protocol=5)
+        with _scope(raw):
+            _data(raw)
+        assert len(captured) == 1 and captured[0]["n_samps"] is raw._raw_extras[0]["n_samps"]
+        assert captured[0]["sel"].tolist() == [3]
+        assert all(len(captured[0][key]) == 1 for key in ("cal", "offsets", "units"))
+        assert pickle.dumps(raw._raw_extras, protocol=5) == before
+
+
 @pytest.mark.parametrize("idx", [np.array([3]), [3], slice(3, 4, 2), slice(0, 1)])
 def test_only_native_one_status_slice_admits_selected_file_reader(source, adapter, monkeypatch, idx):
     raw = _lazy(source)

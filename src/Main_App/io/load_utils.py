@@ -647,6 +647,8 @@ def _read_preflight_eeg_file(
         yield None
         return
 
+    from Main_App.io.bdf_preload import BoundedBdfStatusReadError
+
     raw: Optional[mne.io.BaseRaw] = None
     try:
         stim_name = str(stim_channel or "").strip() or _resolve_stim(app)
@@ -748,6 +750,8 @@ def _read_preflight_eeg_file(
             from Main_App.io.acquisition_metadata import attach_recording_contract
             attach_recording_contract(raw, settings)
             app.log(f"[PREFLIGHT LAZY LOADER READY] {base}")
+    except BoundedBdfStatusReadError:
+        raise
     except Exception as e:
         app.log(f"!!! Load Error {base}: {e}")
         if raw is not None:

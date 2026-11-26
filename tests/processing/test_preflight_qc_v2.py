@@ -1025,6 +1025,46 @@ def test_disk_buffered_and_in_memory_scans_have_identical_qc_payloads(
     assert disk_buffered.condition_qc["disk_buffered_condition_count"] == 1
 
 
+def test_status_memory_bound_preserves_native_scientific_evidence(monkeypatch, tmp_path: Path):
+    raw_path = tmp_path / "P1.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    events = _event_rows()
+    _install_lazy_fakes(monkeypatch, [_LazyRaw(data, names), _LazyRaw(data, names)], events)
+    info = RawFileInfo(raw_path, "P1", "control")
+    options = {"event_map": {"Faces": 1}}
+    ordinary = preflight_qc._scan_one_preflight_file(info, _settings(), project_root=tmp_path / "ordinary", **options)
+    bound = preflight_qc._PreflightStatusBound(preflight_qc._status_source_stamp(raw_path), len(events))
+    constrained = preflight_qc._scan_one_preflight_file(
+        info, _settings(), project_root=tmp_path / "constrained", status_bound=bound, **options,
+    )
+
+    assert ordinary.load_error is None and constrained.load_error is None
+    assert constrained.raw_channel_qc == ordinary.raw_channel_qc
+    assert constrained.raw_spectral_qc == ordinary.raw_spectral_qc
+    assert constrained.condition_qc["event_plan"] == ordinary.condition_qc["event_plan"]
+    assert constrained.condition_qc["cache_status"] == ordinary.condition_qc["cache_status"] == "miss"
+
+
+def test_native_events_above_status_memory_bound_fail_before_qc(monkeypatch, tmp_path: Path):
+    raw_path = tmp_path / "P1.bdf"
+    raw_path.write_bytes(b"synthetic identity")
+    data, names = _raw_data()
+    raw = _LazyRaw(data, names)
+    events = _event_rows()
+    _install_lazy_fakes(monkeypatch, [raw], events)
+    project_root = tmp_path / "project"
+    bound = preflight_qc._PreflightStatusBound(preflight_qc._status_source_stamp(raw_path), len(events) - 1)
+    result = preflight_qc._scan_one_preflight_file(
+        RawFileInfo(raw_path, "P1", "control"), _settings(), project_root=project_root,
+        status_bound=bound, event_map={"Faces": 1},
+    )
+
+    assert "Native events exceeded the verified BDF Status bound" in result.load_error
+    assert raw.reads == []
+    assert not project_root.exists()
+
+
 def test_v2_settings_change_invalidates_cache(monkeypatch, tmp_path: Path) -> None:
     raw_path = tmp_path / "P07.bdf"
     raw_path.write_bytes(b"synthetic identity")

@@ -27,6 +27,7 @@ from Main_App.io.acquisition_metadata import (
     review_geometry_identity,
     source_load_kwargs,
 )
+from Main_App.io.bdf_format import count_bdf_status_transitions
 from Main_App.io.load_utils import RECORDING_NOT_STARTED_REASON, RecordingPreflightInfo
 from Main_App.io.pipeline_events import canonical_recording_events
 from Main_App.processing.processing_controller import RawFileInfo
@@ -77,6 +78,7 @@ from Main_App.workers.mp_env import compute_dynamic_worker_ceiling
 from Main_App.workers.processing_resource_budget import plain_metadata_bytes
 from Main_App.workers.review_resource_budget import (
     ReviewMemoryProbeError,
+    ReviewMemorySnapshot,
     ReviewGeometry,
     bdf_reader_peak_bytes,
     estimate_review_memory,
@@ -850,7 +852,9 @@ def _configured_stim_channel(settings: Mapping[str, Any]) -> str:
     return resolve_recording_contract(settings).stim_channel
 
 
-def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, str]:
+def _find_preflight_events(
+    raw: Any, *, stim_channel: str, require_bounded_status: bool = False,
+) -> tuple[np.ndarray, str]:
     from Main_App.io.recording_access import owned_recording_lazy_read
     canonical = canonical_recording_events(raw)
     if canonical is not None:
@@ -860,7 +864,10 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
     event_kwargs = event_detection_kwargs(raw=raw)
 
     try:
-        with owned_recording_lazy_read(raw, stim_channel=stim_channel, status_only=True):
+        with owned_recording_lazy_read(
+            raw, stim_channel=stim_channel, status_only=True,
+            require_bounded_status=require_bounded_status,
+        ):
             events = mne.find_events(
                 raw,
                 stim_channel=stim_channel,
@@ -870,7 +877,7 @@ def _find_preflight_events(raw: Any, *, stim_channel: str) -> tuple[np.ndarray, 
             )
         source = "stim"
     except (RuntimeError, ValueError):
-        if event_kwargs.get("initial_event"):
+        if require_bounded_status or event_kwargs.get("initial_event"):
             raise
         events, _event_ids = mne.events_from_annotations(raw, verbose=False)
         source = "annotations"
@@ -1616,7 +1623,36 @@ def preflight_worker_count(total: int, max_workers: int | None) -> int:
 _PREFLIGHT_THREAD_BYTES = 64 * 1024**2
 
 
-def _condition_signal_array_bytes(geometry: ReviewGeometry, interval: int) -> int:
+def _uses_condition_array_budget(settings: Mapping[str, Any]) -> bool:
+    return (settings.get("hardware_platform") == "biosemi"
+            and settings.get("hardware_confirmed") is True
+            and settings.get("electrode_montage") == "biosemi64"
+            and np.__version__ == "2.3.1")
+
+
+def _status_source_stamp(path: Path) -> tuple[int, int, int, int, int]:
+    stat = path.stat()
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+@dataclass(frozen=True)
+class _PreflightStatusBound:
+    source_stamp: tuple[int, int, int, int, int]
+    event_rows: int
+    bounded_status: bool = False
+
+
+@dataclass(frozen=True)
+class _PreflightStatusPlan:
+    geometry: ReviewGeometry
+    source_stamp: tuple[int, int, int, int, int]
+    minimum_credit: int
+    bounded_status: bool
+
+
+def _condition_signal_array_bytes(
+    geometry: ReviewGeometry, interval: int, *, bounded_status: bool = False,
+) -> int:
     """Bound one locked occurrence on the lazy, spectral-off BioSemi64 route."""
     samples = min(geometry.source_n_times, interval)
     channels = geometry.scored_channels
@@ -1627,12 +1663,13 @@ def _condition_signal_array_bytes(geometry: ReviewGeometry, interval: int) -> in
     windows = 1 + (samples - window + hop - 1) // hop
     block = 8 * channels * window
 
-    # Keep the complete BDF reader bound for the initial import/open/events.
     # A (possibly disk-backed) full occurrence may already be resident during
     # a lazy get_data call. Whole-record chunks do not survive in this phase.
-    full_reader = bdf_reader_peak_bytes(geometry)
     window_reader = bdf_reader_peak_bytes(replace(geometry, source_n_times=samples))
-    reading = max(full_reader, occurrence + window_reader)
+    reading = occurrence + window_reader
+    if not bounded_status:
+        # The ordinary route still covers a wide Status read at import/open.
+        reading = max(reading, bdf_reader_peak_bytes(geometry))
 
     # The original occurrence, every advanced-indexed channel block (including
     # the tail-aligned overlap), and the unique assembled occurrence may coexist.
@@ -1647,6 +1684,8 @@ def _condition_signal_array_bytes(geometry: ReviewGeometry, interval: int) -> in
 def _preflight_memory_credit(
     info: RawFileInfo, settings: Mapping[str, Any], *, signal_context: bool,
     event_map: Mapping[str, int] | None = None,
+    geometry: ReviewGeometry | None = None, event_rows: int | None = None,
+    bounded_status: bool = False,
 ) -> int | None:
     """Reserve a complete file, including retained evidence, without EEG reads.
 
@@ -1660,7 +1699,8 @@ def _preflight_memory_credit(
         metadata = 16 * plain_metadata_bytes((settings, event_map))
         if not signal_context:
             return _PREFLIGHT_THREAD_BYTES + metadata
-        geometry = read_review_geometry(Path(info.path), settings)
+        if geometry is None:
+            geometry = read_review_geometry(Path(info.path), settings)
         if geometry is None:
             return None
         if event_map is not None and (len(event_map) > 256 or any(
@@ -1674,20 +1714,37 @@ def _preflight_memory_credit(
         # Preflight scores source-rate data, regardless of downstream resampling.
         geometry = replace(geometry, target_rate_hz=geometry.source_rate_hz)
         spectral = normalize_raw_spectral_screening_settings(settings.get("raw_spectral_screening")).enabled
-        if (not spectral and settings.get("hardware_platform") == "biosemi"
-                and settings.get("hardware_confirmed") is True
-                and settings.get("electrode_montage") == "biosemi64"
+        condition_arrays = (not spectral and _uses_condition_array_budget(settings)
                 and geometry.retained_channels == geometry.scored_channels + 1
-                and 0 < geometry.scored_channels <= 64 and np.__version__ == "2.3.1"):
-            arrays = _condition_signal_array_bytes(geometry, interval)
+                and 0 < geometry.scored_channels <= 64)
+        samples, channels = geometry.source_n_times, geometry.scored_channels
+        if bounded_status and (event_rows is None or not condition_arrays):
+            return None
+        physical_geometry = geometry
+        if event_rows is not None:
+            if not condition_arrays or not 0 <= event_rows <= samples + 2:
+                return None
+            physical_channels = geometry.packed_record_bytes // (3 * geometry.source_record_samples)
+            physical_geometry = replace(geometry, loaded_channels=physical_channels)
+        if condition_arrays:
+            arrays = _condition_signal_array_bytes(
+                physical_geometry if bounded_status else geometry, interval, bounded_status=bounded_status,
+            )
         else:
             arrays = estimate_review_memory(
                 geometry, filter_enabled=False, notch_enabled=False, raw_qc_enabled=True,
             ).healthy_bytes
-        samples, channels = geometry.source_n_times, geometry.scored_channels
+        if event_rows is not None:
+            # Keep the physical decoder batches and dense event arrays. The
+            # narrower route enforces a single Status output row at both native
+            # reads. Other inputs keep the whole physical-channel allowance.
+            status_reader = bdf_reader_peak_bytes(physical_geometry)
+            if bounded_status:
+                status_reader -= 16 * (physical_geometry.loaded_channels - 1) * samples
+            arrays = max(arrays, status_reader + 256 * samples)
         # Every sample may be an event/marker. Retain array, plan, and serialized
-        # evidence allowance, rather than assuming a typical sparse trigger train.
-        evidence = 2048 * samples
+        # evidence allowance unless a scan of the exact Status bytes bounded it.
+        evidence = 2048 * (samples if event_rows is None else event_rows)
         # Native marker blocks end at the next onset; approved spans remain in
         # that block and have the exact declared analyzed length. They cannot
         # overlap. Retain per-occurrence/per-window evidence, not just one FFT.
@@ -1721,6 +1778,7 @@ def _scan_one_preflight_file_v2(
     spectral_semaphore: threading.BoundedSemaphore,
     progress_detail: DetailProgressCallback | None,
     should_cancel: CancelCallback | None,
+    status_bound: _PreflightStatusBound | None = None,
 ) -> PreflightQcFileResult | None:
     file_path = Path(info.path)
     participant_id = str(info.subject_id)
@@ -1782,6 +1840,11 @@ def _scan_one_preflight_file_v2(
     if progress_detail:
         progress_detail(f"Planning {file_path.name} · checking source events")
 
+    def _require_current_status_bound() -> None:
+        if status_bound is not None and _status_source_stamp(file_path) != status_bound.source_stamp:
+            raise RuntimeError("The BDF changed during Status-based memory admission; run preflight QC again.")
+
+    _require_current_status_bound()
     file_identity = _preflight_file_identity(file_path, recording_id=recording_id)
     cache_settings = _preflight_cache_settings(
         file_qc_settings, participant_id=participant_id, recording_id=recording_id,
@@ -1793,11 +1856,15 @@ def _scan_one_preflight_file_v2(
         if _preflight_file_identity(file_path, recording_id=recording_id) != file_identity:
             raise RuntimeError("The source recording changed during preflight QC; run QC again.")
 
+    bounded_status = status_bound is not None and status_bound.bounded_status
+    acquisition_settings = {**qc_settings, "project_root": str(project_root), "event_id_map": event_map}
+    if bounded_status:
+        acquisition_settings["_fpvs_preflight_bounded_status"] = True
     raw_context = load_utils.open_preflight_eeg_file(
         _LogShim(),
         str(file_path),
         **source_load_kwargs(qc_settings),
-        acquisition_settings={**qc_settings, "project_root": str(project_root), "event_id_map": event_map},
+        acquisition_settings=acquisition_settings,
     )
     raw = None
     context_entered = False
@@ -1809,6 +1876,7 @@ def _scan_one_preflight_file_v2(
         _record_timing("lazy_open", open_started)
         if raw is None:
             raise RuntimeError("EEG lazy loader returned no raw data.")
+        _require_current_status_bound()
         if _cancelled():
             raise _PreflightQcCancelled()
 
@@ -1832,15 +1900,20 @@ def _scan_one_preflight_file_v2(
                 events, event_source = _find_preflight_events(
                     raw,
                     stim_channel=_configured_stim_channel(qc_settings),
+                    require_bounded_status=bounded_status,
                 )
             if _cancelled():
                 raise _PreflightQcCancelled()
             _require_unchanged_source()
+            if status_bound is not None and len(events) > status_bound.event_rows:
+                raise RuntimeError("Native events exceeded the verified BDF Status bound; run preflight QC again.")
             save_source_events(
                 project_root, events=events, source=event_source, **event_cache_key,
             )
         else:
             events, event_source = cached_events
+            if status_bound is not None and len(events) > status_bound.event_rows:
+                raise RuntimeError("Cached events exceeded the verified BDF Status bound; run preflight QC again.")
         raw_protocol = qc_settings.get("frequency_protocol")
         if raw_protocol is None:
             raise RuntimeError(
@@ -2343,6 +2416,7 @@ def _scan_one_preflight_file(
     spectral_semaphore: threading.BoundedSemaphore | None = None,
     progress_detail: DetailProgressCallback | None = None,
     should_cancel: CancelCallback | None = None,
+    status_bound: _PreflightStatusBound | None = None,
 ) -> PreflightQcFileResult | None:
     file_path = Path(info.path)
     participant_id = str(info.subject_id)
@@ -2372,6 +2446,7 @@ def _scan_one_preflight_file(
                 ),
                 progress_detail=progress_detail,
                 should_cancel=should_cancel,
+                status_bound=status_bound,
             )
         except _PreflightQcCancelled:
             raise
@@ -2506,9 +2581,22 @@ def _scan_preprocessing_qc_parallel(
     indexed_results: dict[int, PreflightQcFileResult | None] = {}
     futures: dict[Future[PreflightQcFileResult | None], tuple[int, RawFileInfo, int, bool]] = {}
     credits: dict[int, int | None] = {}
+    status_plans: dict[int, _PreflightStatusPlan | None] = {}
+    status_bounds: dict[int, _PreflightStatusBound] = {}
     waiting = False
 
     signal_context = project_root is not None and _has_condition_context(qc_settings, event_map)
+
+    def _snapshot() -> ReviewMemorySnapshot:
+        try:
+            snapshot = probe_memory_snapshot()
+        except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError) as exc:
+            raise ReviewMemoryProbeError("Preflight could not read current host memory; retry after checking system resources.") from exc
+        if snapshot.total_bytes <= 0 or snapshot.physical_available_bytes < 0:
+            raise ReviewMemoryProbeError("Preflight received invalid current physical-memory information.")
+        if snapshot.commit_required and snapshot.commit_available_bytes is None:
+            raise ReviewMemoryProbeError("Preflight could not read current Windows commit headroom; retry after checking system resources.")
+        return snapshot
 
     def _next_admissible() -> tuple[int, RawFileInfo, int, bool] | None:
         if any(item[3] for item in futures.values()):
@@ -2521,14 +2609,7 @@ def _scan_preprocessing_qc_parallel(
                 credits[index] = _preflight_memory_credit(
                     info, qc_settings, signal_context=signal_context, event_map=event_map,
                 )
-            try:
-                snapshot = probe_memory_snapshot()
-            except (AttributeError, OSError, OverflowError, RuntimeError, TypeError, ValueError) as exc:
-                raise ReviewMemoryProbeError("Preflight could not read current host memory; retry after checking system resources.") from exc
-            if snapshot.total_bytes <= 0 or snapshot.physical_available_bytes < 0:
-                raise ReviewMemoryProbeError("Preflight received invalid current physical-memory information.")
-            if snapshot.commit_required and snapshot.commit_available_bytes is None:
-                raise ReviewMemoryProbeError("Preflight could not read current Windows commit headroom; retry after checking system resources.")
+            snapshot = _snapshot()
             margin = max(1024**3, snapshot.total_bytes // 16)
             credit = credits[index]
             exclusive = credit is None or credit + margin > snapshot.total_bytes
@@ -2547,6 +2628,89 @@ def _scan_preprocessing_qc_parallel(
                 return index, info, credit, exclusive
             if exclusive:
                 break
+        if (not remaining or futures or not signal_context or not _uses_condition_array_budget(qc_settings)
+                or normalize_raw_spectral_screening_settings(qc_settings.get("raw_spectral_screening")).enabled):
+            return None
+        return _try_status_admission(snapshot, margin)
+
+    def _try_status_admission(
+        snapshot: ReviewMemorySnapshot, margin: int,
+    ) -> tuple[int, RawFileInfo, int, bool] | None:
+        try:
+            from Main_App.io.bdf_preload import supports_bounded_bdf_status
+            from mne_bids import __version__ as bids_version
+        except ImportError:
+            return None
+        if bids_version != "0.16.0":
+            return None
+        # Only inspect Status when the ordinary queue is drained and pinned
+        # estimates block all eligible work. Leave the normal fast path alone.
+        stim_channel = _configured_stim_channel(qc_settings)
+        for index, info in remaining.items():
+            original = credits[index]
+            if original is None or original + margin > snapshot.total_bytes:
+                break  # Preserve exclusive queue boundaries.
+            if should_cancel and should_cancel():
+                return None
+            path = Path(info.path)
+            if index not in status_plans:
+                status_plans[index] = None
+                try:
+                    stamp = _status_source_stamp(path)
+                    geometry = read_review_geometry(path, qc_settings)
+                    if geometry is not None and _status_source_stamp(path) == stamp:
+                        bounded_status = supports_bounded_bdf_status(path, stim_channel=stim_channel)
+                        floor = _preflight_memory_credit(
+                            info, qc_settings, signal_context=True, event_map=event_map,
+                            geometry=geometry, event_rows=2, bounded_status=bounded_status,
+                        )
+                        if floor is not None and floor < original:
+                            status_plans[index] = _PreflightStatusPlan(geometry, stamp, floor, bounded_status)
+                except (OSError, RuntimeError, ValueError):
+                    continue
+            plan = status_plans[index]
+            if plan is None:
+                continue
+            if not memory_admission_fits(
+                snapshot, active_credits={}, active_owned={}, idle_owned=(),
+                worker_count=0, candidate_credit=plan.minimum_credit, worker_floor_bytes=0,
+            ):
+                continue
+            status_plans[index] = None
+            try:
+                if _status_source_stamp(path) != plan.source_stamp:
+                    continue
+                transitions = count_bdf_status_transitions(
+                    path, stim_channel=stim_channel,
+                    expected_samples=plan.geometry.source_n_times,
+                    expected_record_samples=plan.geometry.source_record_samples,
+                    expected_record_bytes=plan.geometry.packed_record_bytes,
+                    should_cancel=should_cancel,
+                )
+                if transitions is None or _status_source_stamp(path) != plan.source_stamp:
+                    continue
+            except (OSError, RuntimeError, ValueError):
+                continue
+            # Include the recording edges as well as interior changes. Pointwise
+            # trigger masks and onset filtering cannot create interior changes.
+            event_rows = transitions + 2
+            credit = _preflight_memory_credit(
+                info, qc_settings, signal_context=True, event_map=event_map,
+                geometry=plan.geometry, event_rows=event_rows, bounded_status=plan.bounded_status,
+            )
+            if credit is None or credit >= original:
+                continue
+            credits[index] = credit
+            status_bounds[index] = _PreflightStatusBound(plan.source_stamp, event_rows, plan.bounded_status)
+            logger.info(
+                "preflight_status_memory_credit file=%s original_bytes=%d candidate_bytes=%d bounded_status=%s",
+                path.name, original, credit, plan.bounded_status,
+            )
+            if memory_admission_fits(
+                _snapshot(), active_credits={}, active_owned={}, idle_owned=(),
+                worker_count=0, candidate_credit=credit, worker_floor_bytes=0,
+            ):
+                return index, info, credit, False
         return None
 
     def _submit_next(executor: ThreadPoolExecutor) -> None:
@@ -2580,6 +2744,7 @@ def _scan_preprocessing_qc_parallel(
                         else None
                     ),
                     should_cancel=should_cancel,
+                    status_bound=status_bounds.pop(index, None),
                 )
             ] = (
                 index,
@@ -2587,6 +2752,7 @@ def _scan_preprocessing_qc_parallel(
                 credit,
                 exclusive,
             )
+            status_plans.pop(index, None)
             del remaining[index]
 
     with ThreadPoolExecutor(

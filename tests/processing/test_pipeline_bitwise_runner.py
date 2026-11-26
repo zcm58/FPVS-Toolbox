@@ -40,6 +40,31 @@ def comparator(monkeypatch):
     return module
 
 
+def test_validated_params_carries_confirmed_biosemi_to_preflight(runner):
+    from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+    from Main_App.projects.experimental_qc_settings import ExperimentalQcSettings
+    from Main_App.projects.hardware import confirm_hardware_selection
+    from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
+
+    preprocessing = confirm_hardware_selection(new_project_preprocessing_settings(), "biosemi")
+    project = SimpleNamespace(
+        refresh_electrode_geometry_settings=lambda: None,
+        preprocessing=preprocessing,
+        frequency_protocol=FrequencyProtocol.from_recurrence(
+            6, 5, expected_analyzed_oddball_cycles=144,
+            expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+        ),
+        event_map={"Faces": 14},
+        experimental_qc_settings=ExperimentalQcSettings(),
+    )
+
+    params = runner.validated_params(project)
+
+    assert params["hardware_platform"] == "biosemi"
+    assert params["hardware_confirmed"] is True
+    assert params["electrode_montage"] == "biosemi64"
+
+
 def _native_history_fixture(tmp_path):
     from copy import deepcopy
 

@@ -534,6 +534,7 @@ def validated_params(project) -> dict:
         require_removed_electrode_detection_choice_ready,
         validate_protocol_condition_codes,
     )
+    from Main_App.projects.preprocessing_settings import processing_metadata_snapshot
 
     project.refresh_electrode_geometry_settings()
     normalized = normalize_preprocessing_settings(project.preprocessing)
@@ -585,6 +586,7 @@ def validated_params(project) -> dict:
         converted[key] = dict(converted[key] or {})
     for key in ("manual_excluded_participants", "manual_excluded_recordings"):
         converted[key] = list(converted[key] or [])
+    converted.update(processing_metadata_snapshot(normalized))
     return converted
 
 
