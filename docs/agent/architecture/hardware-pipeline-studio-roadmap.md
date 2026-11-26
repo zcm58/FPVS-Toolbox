@@ -57,7 +57,7 @@ silently turn aspirational boxes into current support claims.
 | Brain Products | Shared discovery/loading/preflight/pipeline/export routes accept BVCDF and single-participant BVRF 1.0.0. Project hardware, reference, channel roles, and selected montage persist. See the [loading contract](eeg-loading-contract.md#brain-products-project-route). | Historical formats, multi-participant BVRF splitting, hardware gain/latency qualification, and BioSemi-specific statistical/spatial capability qualification remain separate work. |
 | BIDS admission | `io.bids_import` / `bids_loader` publish project-local BDF/BVCDF datasets and a lossless BVRF derivative, returning MNE Raw through common full/lazy/prefetch reads. Unicorn preserves original BDF plus the narrowly normalized unit-header copy and unchanged packed samples. | External BIDS study import/export, additional source formats, and laboratory acceptance remain separate work. |
 | Processing | Shared MNE stages consume generic recording metadata and project settings through 19 fixed versioned method slots. Per-project selections, checkpoints and exports share method identity; current algorithms and historical default fingerprints are preserved. Hardware defaults and geometry qualification remain upstream. | Qualify alternative algorithms and add compact method selectors with their parameter controls. Arbitrary reordering is unsupported. |
-| Studio project import | `Main_App.projects.fpvs_config_import` reads supported setup and completed-session configurations into a new local project, retaining source provenance and unbound completion evidence. The operator selects hardware and registers raw EEG. See [accepted formats and scientific subset](project-io.md#studio-config-handoff). | Add a persisted reviewed link between Studio session evidence and the canonical Toolbox recording, and support for currently rejected condition-duration, differing-frequency and masking/catch semantics. Qualify visible and installed-release workflows separately; format recognition is not complete Studio compatibility. |
+| Studio project import | `Main_App.projects.fpvs_config_import` reads supported setup and completed-session configurations into a new local project, retaining source provenance and unbound completion evidence. Declared recorder and cap settings select the processing montage. The operator registers raw EEG and supplies missing hardware information. See [accepted formats and scientific subset](project-io.md#studio-config-handoff). | Add a persisted reviewed link between Studio session evidence and the canonical Toolbox recording, and support for currently rejected condition-duration, differing-frequency and masking/catch semantics. Qualify visible and installed-release workflows separately; format recognition is not complete Studio compatibility. |
 | Studio acquisition evidence | `Main_App.io.studio_acquisition_evidence` validates a candidate handoff and compares ordered trigger codes only after reviewed recording association. | Qualify receiver integration, recording identity, acquisition facts, and timing semantics. Code agreement alone does not prove sample timing or recording completeness. |
 | Updates | The independent updater uses ported Studio design/contracts with Toolbox-specific application and installer identities. | Maintain versioned protocol parity where intended. Updater similarity does not establish experiment/data interoperability. |
 
@@ -174,11 +174,16 @@ identity; their scientific comparability must not be assumed.
 
 ### Required Brain Products support
 
-The maintainer wants broad Brain Products support and has not specified an
-amplifier, cap, channel count, reference, or Recorder version. Do not select one
-by assumption or require the user to know the model before planning the shared
-architecture. Detect documented format/acquisition metadata where available;
-request explicit montage/reference information only where it cannot be established.
+Toolbox supports the standard actiCAP slim/snap GACS 64- and 128-electrode
+layouts as explicit project templates. The operator selects the matching cap.
+Other Brain Products caps can still use positions embedded in the recording.
+See the [built-in cap templates](eeg-loading-contract.md#built-in-cap-templates).
+
+Importing a participant's separate BrainVision CapTrak scan is planned for
+future work. That import will need to bind the scan to its recording, validate
+units, coordinate frame, fiducials and electrode labels, and retain the scan's
+provenance. CapTrak's camera system works with actiCAP electrodes.
+[BrainVision CapTrak](https://www.brainproducts.com/solutions/captrak/)
 
 The format inventory must cover BrainVision Core/Data Exchange recordings
 (`.vhdr`, `.vmrk`, `.eeg`) and BrainVision Recording Format (BVRF: `.bvrh`,

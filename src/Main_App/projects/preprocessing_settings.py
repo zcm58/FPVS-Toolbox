@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from copy import deepcopy
 from typing import Any, Callable, Dict, Iterable, Mapping
 from Main_App.projects.hardware import (
-    HARDWARE_SETTINGS_KEYS,
+    HARDWARE_SETTINGS_KEYS, SUPPORTED_ELECTRODE_MONTAGES,
     RECORDED_GEOMETRY_PLATFORMS, UNICORN_FACTORY_MAPPING_PROFILE,
-    normalize_hardware_settings, resolve_hardware,
+    normalize_hardware_settings, resolve_hardware, validate_electrode_montage,
 )
 from Main_App.processing.pipeline_plan import (
     RECORDING_CACHE_SETTING_KEYS,
@@ -153,15 +153,6 @@ class RemovedElectrodeDetectionConfirmationRequired(RuntimeError):
 ELECTRODE_MONTAGE_BIOSEMI64 = "biosemi64"
 ELECTRODE_MAPPING_PROFILE_ANATOMICAL = "anatomical_labels"
 ELECTRODE_MAPPING_PROFILE_BIOSEMI64_1020_AB_V1 = "biosemi64_1020_ab_v1"
-SUPPORTED_ELECTRODE_MONTAGES: tuple[tuple[str, str], ...] = (
-    (ELECTRODE_MONTAGE_BIOSEMI64, "BioSemi ActiveTwo 64"),
-    ("recorded", "Recorded electrode positions"),
-    ("standard_1020", "Standard 10-20"),
-    ("standard_1005", "Standard 10-05"),
-    ("easycap-M1", "EasyCap M1"),
-    ("easycap-M10", "EasyCap M10"),
-    ("unicorn8", "Unicorn Hybrid Black 8"),
-)
 SUPPORTED_ELECTRODE_MAPPING_PROFILES: tuple[tuple[str, str], ...] = (
     (ELECTRODE_MAPPING_PROFILE_ANATOMICAL, "Anatomical BDF labels (default)"),
     (
@@ -1236,15 +1227,12 @@ def normalize_preprocessing_settings(
             "BioSemi ActiveTwo 64 montage."
         )
 
-    if platform == "biosemi" and normalized["electrode_montage"] != ELECTRODE_MONTAGE_BIOSEMI64:
-        raise ValueError("Unsupported electrode montage: BioSemi processing requires the BioSemi ActiveTwo 64 montage.")
-    if recorded_geometry and normalized["electrode_montage"] == "unicorn8":
-        raise ValueError("The Unicorn montage requires a Unicorn project.")
+    validate_electrode_montage(platform, normalized["electrode_montage"])
     mapping = normalized["electrode_mapping_profile"]
     if mapping == UNICORN_FACTORY_MAPPING_PROFILE and not unicorn:
         raise ValueError("The Unicorn factory channel mapping requires a Unicorn project.")
     if unicorn:
-        if normalized["electrode_montage"] != "unicorn8" or channel_limit != 8:
+        if channel_limit != 8:
             raise ValueError("Unicorn processing requires all eight scalp channels in the Unicorn montage.")
         if normalized["downsample"] != 250:
             raise ValueError("Unicorn processing must retain the native 250 Hz sampling grid.")

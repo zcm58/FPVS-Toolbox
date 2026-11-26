@@ -86,18 +86,18 @@ def run_app() -> int:
         QCoreApplication.setApplicationName("FPVS Toolbox")
         QCoreApplication.setApplicationVersion(APP_VERSION)
 
-        settings = get_settings()
-        debug = settings.debug_enabled()
+        debug = get_settings().debug_enabled()
         configure_logging(debug)
         install_messagebox_logger(debug)
 
         from PySide6.QtWidgets import QApplication
         from Main_App.gui.diagnostics_preferences import disclose_automatic_reporting
         from Main_App.gui.theme import set_appearance_mode
+        from Main_App.settings.appearance import read_saved_appearance_mode
 
         app = QApplication([])
         if reporter is not None:
-            set_appearance_mode(app, settings.get_appearance_mode())
+            set_appearance_mode(app, read_saved_appearance_mode())
             disclose_automatic_reporting(reporter)
 
         from Main_App.gui.icons import application_icon

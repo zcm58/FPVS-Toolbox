@@ -985,15 +985,18 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
     except (OSError, ValueError, RuntimeError) as exc:
         QMessageBox.critical(parent, "Import Failed", str(exc))
         return None
-    hardware_settings = choose_new_project_hardware(parent, new_project_preprocessing_settings())
-    if hardware_settings is None:
-        return None
+    hardware_settings = None
+    if imported.recording_selection is None:
+        hardware_settings = choose_new_project_hardware(parent, new_project_preprocessing_settings())
+        if hardware_settings is None:
+            return None
     try:
         project = create_project_from_fpvs_config(root, Path(path), imported)
-        project.update_preprocessing(confirm_hardware_selection(
-            project.preprocessing, hardware_settings["hardware_platform"], confirmed_change=True,
-        ))
-        project.save()
+        if hardware_settings is not None:
+            project.update_preprocessing(confirm_hardware_selection(
+                project.preprocessing, hardware_settings["hardware_platform"], confirmed_change=True,
+            ))
+            project.save()
         input_folder = QFileDialog.getExistingDirectory(
             parent,
             "Select Folder Containing EEG Recordings",

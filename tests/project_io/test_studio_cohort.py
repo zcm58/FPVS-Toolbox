@@ -34,6 +34,59 @@ def write_source(tmp, source):
     return read_fpvs_config(dest)
 
 
+def _set_brainvision_cap(source, visit_index, montage):
+    visit = source["visits"][visit_index]
+    setup = deepcopy(source["setups"][visit["setup_id"]])
+    setup.pop("recording", None)
+    setup["toolbox"].pop("acquisition_profile", None)
+    key = digest(setup)
+    source["setups"][key] = setup
+    visit.update(setup_id=key, recording={"selected_backend": "brainproducts_triggerbox", "electrode_montage": montage})
+
+
+def test_study_cap_uses_selected_visits_and_keeps_later_project_edits(tmp_path):
+    source = make_source()
+    cap64, cap128 = "brainproducts_acticap_gacs_64", "brainproducts_acticap_gacs_128"
+    for index, cap in enumerate((cap128, cap64, cap128)):
+        _set_brainvision_cap(source, index, cap)
+    data = write_source(tmp_path, source)
+    assert data.recording_selection is None
+    assert data.study_recording_platform == "brain_products"
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for visit in source["visits"]:
+        (raw / f"P{visit['participant_number']}.vhdr").touch()
+    review = review_study(data, raw, hardware="brain_products")
+    decisions = {r.visit["visit_id"]: ("matched", r.candidates[0]) for r in review.rows}
+    options = dict(decisions=decisions, omissions={},
+                   versions=[source["visits"][0]["protocol_version_id"]])
+    with pytest.raises(ValueError, match="incompatible"):
+        commit_study_review(tmp_path / "projects", data, review, **options)
+    decisions["exec-2"] = ("awaiting_eeg", None)
+    project = commit_study_review(tmp_path / "projects", data, review, **options)
+    assert project.preprocessing["electrode_montage"] == cap128
+    project.update_preprocessing({**project.preprocessing, "electrode_montage": cap64})
+    project.save()
+    revised = review_study(data, raw, project)
+    assert "conflicts" in revised.rows[0].problem
+    with pytest.raises(ValueError, match="compatible evidence"):
+        commit_study_review(tmp_path / "projects", data, revised, existing=project, **options)
+    assert project.preprocessing["electrode_montage"] == cap64
+
+
+def test_mixed_recorders_still_require_manual_cohort_review(tmp_path):
+    source = make_source()
+    for index in range(3):
+        _set_brainvision_cap(source, index, "brainproducts_acticap_gacs_64")
+    source["visits"][1]["recording"] = {"selected_backend": "biosemi_active_three", "electrode_montage": "biosemi128"}
+    data = write_source(tmp_path, source)
+    assert data.recording_selection is None and data.study_recording_platform is None
+    review = review_study(data, tmp_path, hardware="brain_products")
+    assert "differs from project hardware" in review.rows[1].problem
+    with pytest.raises(ValueError, match="Select the project recording system"):
+        commit_study_review(tmp_path / "projects", data, review, decisions={}, omissions={}, versions=[])
+
+
 def test_cohort_review_and_revised_import_keep_history_and_filter_processing(tmp_path):
     from Main_App.processing.processing_controller import prepare_batch_files, raw_file_info_for_path
     from Main_App.projects.project import Project

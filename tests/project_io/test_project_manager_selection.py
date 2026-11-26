@@ -102,7 +102,7 @@ def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_p
 
     imported_project = SimpleNamespace(preprocessing={}, update_preprocessing=lambda _settings: None, save=fail_save)
     workflow["create_project_from_fpvs_config"] = lambda *_: imported_project
-    workflow["read_fpvs_config"] = lambda _path: SimpleNamespace(provenance={})
+    workflow["read_fpvs_config"] = lambda _path: SimpleNamespace(provenance={}, recording_selection=None)
     assert workflow["new_project_from_fpvs_config"](host) is None
     assert host.currentProject is current_project
     assert loaded == []
@@ -133,6 +133,27 @@ def test_completed_studio_import_shows_identity_review_without_binding(workflow,
     title, message = workflow["messages"][0]
     assert title == "Project Created"
     assert "007, visit 2" in message and "P9, P10" in message
+
+
+def test_explicit_studio_montage_skips_hardware_prompt(workflow, tmp_path):
+    source = Path(__file__).parents[1] / "fixtures/studio_handoff/v2-setup.fpvsconfig"
+    payload = json.loads(source.read_text())
+    payload["recording"] = {"recording_backend": "brainproducts_parallel",
+                            "electrode_montage": "brainproducts_acticap_gacs_128"}
+    payload["toolbox"].pop("acquisition_profile")
+    config = tmp_path / "cap.fpvsconfig"
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    host = SimpleNamespace(loadProject=lambda _: None)
+    workflow["ensure_projects_root"] = lambda _parent: tmp_path / "projects"
+    workflow["QFileDialog"] = SimpleNamespace(getOpenFileName=lambda *_: (str(config), ""),
+                                              getExistingDirectory=lambda *_: "")
+    workflow["choose_new_project_hardware"] = lambda *_: pytest.fail("The handoff already declares a cap.")
+    workflow["create_project_from_fpvs_config"] = create_project_from_fpvs_config
+    project = workflow["new_project_from_fpvs_config"](host)
+    reopened = Project.load(project.project_root)
+    assert reopened.preprocessing["hardware_platform"] == "brain_products"
+    assert reopened.preprocessing["electrode_montage"] == "brainproducts_acticap_gacs_128"
+    assert "GACS" in workflow["messages"][0][1]
 
 
 def test_new_project_safe_name_preserves_settings_and_input(workflow, tmp_path):

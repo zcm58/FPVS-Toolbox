@@ -49,9 +49,11 @@ def open_brain_products_raw(
         if roles:
             raw.set_channel_types(dict(roles))
         montage = str(settings.get("electrode_montage") or "recorded")
+        dropped_refs = settings.get("initial_reference_channels", ()) if settings.get("drop_reference_channels") else ()
         attach_raw_recorded_geometry(
             raw, montage_id=montage,
             template_montage=None if montage == "recorded" else montage,
+            dropped_reference_channels=dropped_refs,
         )
         from Main_App.io.acquisition_metadata import attach_recording_contract
         attach_recording_contract(raw, settings)
@@ -75,11 +77,13 @@ def open_profiled_bdf_raw(app: Any, path: str | Path, *, settings: Mapping,
     from Main_App.io.brain_products import close_brain_products_raw, validate_electrical_channel_units
     from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
     from Main_App.io.acquisition_metadata import attach_recording_contract
-    from Main_App.projects.hardware import require_hardware_ready
+    from Main_App.projects.hardware import require_hardware_ready, validate_electrode_montage
 
     platform = require_hardware_ready(settings, paths=(Path(path),))
     if platform not in {"unicorn", "biosemi_active_three"}:
         raise ValueError("This BDF adapter requires an explicit supported acquisition selection.")
+    if platform == "unicorn":
+        validate_electrode_montage(platform, settings.get("electrode_montage") or "unicorn8")
     raw = read_project_bids_raw(
         app, path, settings=settings, preload=preload, stim_channel=stim_channel,
         **({"temporary_imports": temporary_imports} if temporary_imports is not None else {}),
@@ -113,9 +117,10 @@ def open_profiled_bdf_raw(app: Any, path: str | Path, *, settings: Mapping,
             if roles:
                 raw.set_channel_types(roles, verbose=False)
             montage = str(settings.get("electrode_montage") or "recorded")
-            attach_raw_recorded_geometry(raw, montage_id=montage,
-                                         template_montage=None if montage == "recorded" else montage,
-                                         hardware_platform=platform)
+            attach_raw_recorded_geometry(
+                raw, montage_id=montage, template_montage=None if montage == "recorded" else montage,
+                hardware_platform=platform, dropped_reference_channels=refs if settings.get("drop_reference_channels") else (),
+            )
         attach_recording_contract(raw, settings)
         return raw
     except BaseException:
@@ -138,6 +143,9 @@ def restore_cached_recorded_geometry(raw: Any, identity: Mapping) -> dict:
 
     validated = validate_recorded_geometry_identity(identity)
     eeg = [name for name, kind in zip(raw.ch_names, raw.get_channel_types(), strict=True) if kind == "eeg"]
+    external_refs = validated.get("reference_only_channels", ())
+    if external_refs:
+        eeg = [name for name in eeg if name not in external_refs]
     if eeg != validated["retained_scalp_channels"]:
         raise ValueError("Cached EEG channel roles or order differ from source geometry.")
     for name, expected in validated["channel_coordinates_m"].items():

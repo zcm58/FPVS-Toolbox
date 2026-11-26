@@ -60,8 +60,13 @@ def test_new_project_hardware_dialog_cancellation_returns_no_draft(monkeypatch):
     assert settings == {"existing": "kept"}
 
 
-@pytest.mark.parametrize("platform", ["brain_products", "biosemi_active_three"])
-def test_recorded_geometry_settings_controls_save_reference_and_roles(qtbot, tmp_path, monkeypatch, platform):
+@pytest.mark.parametrize("platform,montage,incompatible", [
+    ("brain_products", "brainproducts_acticap_gacs_64", "biosemi128"),
+    ("biosemi_active_three", "biosemi128", "brainproducts_acticap_gacs_128"),
+])
+def test_recorded_geometry_settings_controls_save_reference_and_roles(
+    qtbot, tmp_path, monkeypatch, platform, montage, incompatible,
+):
     monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path / "config"))
     project = _prep_project(tmp_path)
     project.update_preprocessing(confirm_hardware_selection(project.preprocessing, platform, confirmed_change=True))
@@ -69,7 +74,11 @@ def test_recorded_geometry_settings_controls_save_reference_and_roles(qtbot, tmp
     widget = SettingsDialog(SettingsManager(str(tmp_path / "settings.ini")), project=project)
     qtbot.addWidget(widget)
     assert widget.hardware_platform_combo.currentData() == platform
-    assert widget.electrode_montage_combo.isEnabled()
+    combo = widget.electrode_montage_combo
+    assert combo.isEnabled()
+    assert combo.model().item(combo.findData(montage)).isEnabled()
+    assert not combo.model().item(combo.findData(incompatible)).isEnabled()
+    combo.setCurrentIndex(combo.findData(montage))
     assert not widget.kurtosis_screening_enabled_check.isEnabled()
     assert not widget.raw_signal_screening_enabled_check.isEnabled()
     assert not widget.interpolation_burden_review_enabled_check.isEnabled()
@@ -82,6 +91,7 @@ def test_recorded_geometry_settings_controls_save_reference_and_roles(qtbot, tmp
     assert values["channel_types"] == {"VEOG": "eog", "ECG": "ecg"}
     assert widget.save_pending_changes()
     reopened = Project.load(project.project_root)
+    assert reopened.preprocessing["electrode_montage"] == montage
     assert reopened.preprocessing["channel_types"] == {"VEOG": "eog", "ECG": "ecg"}
     assert reopened.preprocessing["initial_reference"] == "channels"
 

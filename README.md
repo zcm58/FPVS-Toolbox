@@ -1,8 +1,7 @@
 # FPVS Toolbox
 
 FPVS Toolbox is a Windows desktop application for processing and analyzing EEG
-data from Fast Periodic Visual Stimulation (FPVS) oddball experiments recorded
-with BioSemi systems.
+data from Fast Periodic Visual Stimulation (FPVS) oddball experiments.
 
 The toolbox implements published FPVS processing methods in an approachable
 graphical interface. Its workflow covers project setup, preprocessing,
@@ -26,6 +25,10 @@ remain available as historical downloads.
 
 ## Features
 
+- The source supports project-selected cap templates for BioSemi ActiveTwo 64,
+  BioSemi ActiveThree 128 radial ABC, Unicorn Hybrid Black 8, and Brain Products
+  actiCAP slim/snap GACS 64 and 128. Select the matching cap in **Settings >
+  Processing > Electrode montage**. [Supported recording routes and cap layouts](docs/agent/architecture/eeg-loading-contract.md#built-in-cap-templates)
 - Parallel workflows for processing large FPVS-oddball datasets
 - Automated batch preprocessing: referencing, filtering, resampling,
   reviewed kurtosis-based channel screening, and authorized channel interpolation

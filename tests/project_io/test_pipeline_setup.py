@@ -222,6 +222,26 @@ def test_direct_hardware_mutation_cannot_bypass_warning(project):
         draft.save(project)
 
 
+@pytest.mark.parametrize("platform,montage,incompatible", [
+    ("biosemi_active_three", "biosemi128", "brainproducts_acticap_gacs_128"),
+    ("brain_products", "brainproducts_acticap_gacs_64", "biosemi128"),
+    ("brain_products", "brainproducts_acticap_gacs_128", "biosemi128"),
+])
+def test_native_cap_choices_validate_and_roundtrip_in_setup(project, platform, montage, incompatible):
+    draft = PipelineSetupDraft.from_project(project)
+    draft.confirm_hardware(platform, confirmed_change=True)
+    draft.save(project)
+    assert draft.preprocessing["electrode_montage"] == "recorded"
+    choices = dict(draft.control_policy.allowed_montages)
+    assert montage in choices and incompatible not in choices
+    with pytest.raises(ValueError, match="montage"):
+        draft.update_preprocessing({"electrode_montage": incompatible})
+    draft.update_preprocessing({"electrode_montage": montage})
+    assert draft.requires_reprocessing
+    draft.save(project)
+    assert Project.load(project.project_root).preprocessing["electrode_montage"] == montage
+
+
 @pytest.mark.parametrize("key,value,page", [("downsample", 0, "resampling"), ("low_pass", float("nan"), "filtering"),
                                          ("rejection_z", float("inf"), "qc")])
 def test_invalid_numbers_rejected_by_relevant_page(project, key, value, page):

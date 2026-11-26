@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from Main_App.io.acticap_montages import make_acticap_montage
 from Main_App.io.load_utils import open_preflight_eeg_file
+from Main_App.io.recorded_eeg_geometry import validate_raw_eeg_geometry
 from Main_App.io.recording_sources import companion_identity
 from Main_App.io.spectral_data import SPECTRAL_SHEET_NAMES, read_spectral_sheet
 from Main_App.processing.preflight_qc import _find_preflight_events, scan_preprocessing_qc
@@ -17,6 +19,7 @@ from Main_App.processing.processing_controller import RawFileInfo
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
 from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+from Main_App.projects.hardware import ACTICAP_GACS_64, ACTICAP_GACS_128
 from Main_App.workers.process_runner import _run_full_pipeline_for_file
 
 
@@ -25,16 +28,18 @@ CHANNELS = ["Fz", "Cz", "Pz", "O1", "O2"]
 SFREQ = 256
 
 
-def _recording(tmp_path: Path, extension: str, channels: list[str] | None = None) -> tuple[Path, np.ndarray]:
+def _recording(
+    tmp_path: Path, extension: str, channels: list[str] | None = None, *, seconds: int = 80,
+) -> tuple[Path, np.ndarray]:
     channels = channels or CHANNELS
-    times = np.arange(80 * SFREQ) / SFREQ
+    times = np.arange(seconds * SFREQ) / SFREQ
     amplitudes = (np.array([10, 8, 4, 2, 1]) if channels == CHANNELS else np.linspace(10, 1, len(channels)))[:, None]
     signal_uv = amplitudes * np.sin(2 * np.pi * 2 * times)
     signal_uv += np.linspace(1, 5, len(channels))[:, None] * np.sin(2 * np.pi * 8 * times)
     # Small deterministic noise keeps neighboring-noise metrics well-defined.
     signal_uv += np.random.default_rng(1234).normal(scale=.03, size=signal_uv.shape)
     samples = [2 * SFREQ + index * (SFREQ // 2) for index in range(129)]
-    events = np.array([[0, 0, 21], *[[sample, 0, 55] for sample in samples]])
+    events = np.array([[0, 0, 21], *[[sample, 0, 55] for sample in samples if sample < len(times)]])
     path = tmp_path / f"P01{extension}"
     if extension == ".vhdr":
         path.write_text(
@@ -95,8 +100,14 @@ def _settings(path: Path, *, preload_in_memory: bool) -> dict:
     (".vhdr", True, "recorded", CHANNELS), (".bvrh", True, "recorded", CHANNELS),
     (".vhdr", False, "standard_1020", CHANNELS),
     (".bvrh", False, "recorded", [f"Sensor{i:02d}" for i in range(64)]),
+    pytest.param(".vhdr", False, ACTICAP_GACS_64, None, id="acticap-64-iz"),
+    pytest.param(".bvrh", False, ACTICAP_GACS_128, None, id="acticap-128-fcz"),
 ])
 def test_real_recording_to_spectral_export(tmp_path, extension, preload_in_memory, montage, channels):
+    template = None
+    if channels is None:
+        template = make_acticap_montage(montage, recorded_fcz=montage == ACTICAP_GACS_128)
+        channels = list(reversed(template.ch_names))
     project_root = tmp_path / "project"
     project_root.mkdir()
     path, expected_events = _recording(project_root, extension, channels)
@@ -123,7 +134,12 @@ def test_real_recording_to_spectral_export(tmp_path, extension, preload_in_memor
     assert result["post_export_ok"] is True
     assert result["geometry"]["hardware_platform"] == "brain_products"
     assert result["geometry"]["retained_scalp_channels"] == channels
-    assert result["geometry"]["geometry_status"] == ("available" if montage == "standard_1020" else "unavailable")
+    assert result["geometry"]["geometry_status"] == ("unavailable" if montage == "recorded" else "available")
+    if template is not None:
+        assert result["geometry"]["montage_id"] == montage
+        assert result["geometry"]["coordinate_source"] == "explicit_project_template"
+        for name, position in template.get_positions()["ch_pos"].items():
+            np.testing.assert_allclose(result["geometry"]["channel_coordinates_m"][name], position, atol=1e-12)
     assert result["audit"]["sfreq"] == 128
     assert result["export_receipts"]
     assert result["preproc_cache_status"] == "stored"
@@ -151,6 +167,46 @@ def test_real_recording_to_spectral_export(tmp_path, extension, preload_in_memor
     cached_fft = read_spectral_sheet(bundles[0], sheet_name=SPECTRAL_SHEET_NAMES[0])
     np.testing.assert_allclose(cached_fft.iloc[:, 1:].to_numpy(dtype=float),
                                full_fft.iloc[:, 1:].to_numpy(dtype=float), atol=1e-8, rtol=0)
+
+
+@pytest.mark.parametrize("extension, montage, recorded_fcz", [
+    (".vhdr", ACTICAP_GACS_128, False),
+    (".bvrh", ACTICAP_GACS_64, True),
+])
+def test_acticap_distinguishes_scalp_auxiliary_and_separate_reference(tmp_path, extension, montage, recorded_fcz):
+    template = make_acticap_montage(montage, recorded_fcz=recorded_fcz)
+    scalp = list(reversed(template.ch_names))
+    external_ref = "Iz" if recorded_fcz else "FCz"
+    path, events = _recording(tmp_path, extension, ["Blink", external_ref, *scalp], seconds=3)
+    settings = _settings(path, preload_in_memory=False)
+    settings.update(electrode_montage=montage, channel_types={"Blink": "eog"}, initial_reference="channels",
+                    initial_reference_channels=[external_ref], drop_reference_channels=True)
+    with open_preflight_eeg_file(SimpleNamespace(log=lambda _: None), str(path), acquisition_settings=settings) as raw:
+        geometry = validate_raw_eeg_geometry(raw, require_coordinates=True)
+        assert raw.get_channel_types(picks=["Blink", external_ref, "Status"]) == ["eog", "eeg", "stim"]
+        assert geometry["reference_only_channels"] == [external_ref]
+        assert geometry["retained_scalp_channels"] == scalp
+        assert set(geometry["channel_coordinates_m"]) == set(scalp)
+        np.testing.assert_array_equal(_find_preflight_events(raw, stim_channel="Status")[0], events)
+
+
+@pytest.mark.parametrize("extension, montage, replacement, message", [
+    (".vhdr", ACTICAP_GACS_64, "Sensor1", r"Missing electrodes.*Fp1.*Unexpected EEG channels.*Sensor1"),
+    (".bvrh", ACTICAP_GACS_128, None, r"Missing electrodes.*Fp1"),
+    (".bvrh", ACTICAP_GACS_64, "FCz", r"unambiguous Iz or FCz"),
+])
+def test_acticap_rejects_incomplete_or_ambiguous_header(tmp_path, extension, montage, replacement, message):
+    channels = make_acticap_montage(montage).ch_names.copy()
+    channels.remove("Fp1")
+    if replacement is not None:
+        channels.append(replacement)
+    path, _ = _recording(tmp_path, extension, channels, seconds=1)
+    settings = _settings(path, preload_in_memory=False)
+    settings["electrode_montage"] = montage
+    with pytest.raises(ValueError, match=message), open_preflight_eeg_file(
+        SimpleNamespace(log=lambda _: None), str(path), acquisition_settings=settings,
+    ):
+        pass
 
 
 @pytest.mark.parametrize("extension", [".vhdr", ".bvrh"])

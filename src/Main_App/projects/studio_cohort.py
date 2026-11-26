@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from copy import deepcopy
 import hashlib
 import json
@@ -16,6 +16,9 @@ from uuid import UUID
 
 from Main_App.io.file_filters import is_eeg_recording_file
 from Main_App.projects.raw_identity import infer_raw_participant_id
+from Main_App.projects.studio_handoff import (
+    STUDIO_RECORDER_PLATFORMS, StudioRecordingSelection, studio_recording_selection,
+)
 
 FORMAT = "fpvs-study-handoff"
 NAMESPACE = "studio_cohort"
@@ -116,6 +119,36 @@ def _method(setup: dict) -> tuple:
     return (result.event_map, result.frequency_protocol.to_manifest(), result.oddball_marker_code)
 
 
+def _visit_selection(source, visit) -> StudioRecordingSelection | None:
+    return studio_recording_selection(source["setups"][visit["setup_id"]], as_run=visit.get("recording") or {})
+
+
+def study_recording_consensus(source) -> tuple[str | None, StudioRecordingSelection | None]:
+    """Resolve recorder and montage agreement independently across captured visits."""
+    selections = set()
+    for visit in source["visits"]:
+        if visit["state"] == "completed" and not visit["issues"] and visit.get("setup_id"):
+            try:
+                selection = _visit_selection(source, visit)
+            except ValueError:
+                return None, None  # The review row reports the conflicting capture.
+            if selection is None:
+                return None, None
+            selections.add(selection)
+    platforms = {selection.platform for selection in selections}
+    return (platforms.pop() if len(platforms) == 1 else None,
+            selections.pop() if len(selections) == 1 else None)
+
+
+def _visit_method(source, visit):
+    recording = visit["recording"] or {}
+    method = (_method(source["setups"][visit["setup_id"]]), recording.get("selected_backend"),
+              recording.get("acquisition_profile"))
+    selection = _visit_selection(source, visit)
+    # Retained visits from historical rosters already use the three-field digest.
+    return (*method, selection.montage) if selection else method
+
+
 def version_key(visit: Mapping[str, Any]) -> str:
     return visit.get("protocol_version_id") or "Unrecorded version"
 
@@ -199,11 +232,14 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
         else:
             try:
                 _method(source["setups"][visit["setup_id"]])
+                selection = _visit_selection(source, visit)
+                if selection and existing and not selection.matches(existing.preprocessing):
+                    reason = f"Studio montage {selection.label} conflicts with the current project recording settings."
             except ValueError as exc:
                 reason = str(exc)
         reviewed = prior.get("raw_file")
         stable_match = reviewed in files and tuple(prior.get("file_identity", ())) == files[reviewed] if reviewed else False
-        if change == "unchanged" and (stable_match or prior.get("decision") in {"awaiting_eeg", "excluded"}):
+        if change == "unchanged" and ((stable_match and not reason) or prior.get("decision") in {"awaiting_eeg", "excluded"}):
             status = prior["decision"]
         elif reason:
             status = "exception"
@@ -218,9 +254,7 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
 
 
 def _hardware(visit):
-    return {"serial": "biosemi", "biosemi_active_three": "biosemi_active_three",
-            "brainproducts_triggerbox": "brain_products", "brainproducts_parallel": "brain_products",
-            "unicorn_udp": "unicorn"}.get((visit.get("recording") or {}).get("selected_backend"))
+    return STUDIO_RECORDER_PLATFORMS.get((visit.get("recording") or {}).get("selected_backend"))
 
 
 def find_study_project(projects_root: Path, study_id: str):
@@ -248,7 +282,7 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
         raise ValueError("Explicitly resolve each omitted visit before changing project membership.")
     matches = {}
     used = set()
-    selected_setup = signature = None
+    selected_setup = selection = signature = None
     for row in review.rows:
         visit, key = row.visit, row.visit["visit_id"]
         decision, name = decisions.get(key, (None, None))
@@ -274,8 +308,7 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
             entry.update(raw_file=name, file_identity=list(review.files[name]),
                          recording_id="studio_" + hashlib.sha256(key.encode()).hexdigest()[:20])
             setup = source["setups"][visit["setup_id"]]
-            recording = visit["recording"] or {}
-            method = (_method(setup), recording.get("selected_backend"), recording.get("acquisition_profile"))
+            method = _visit_method(source, visit)
             entry["method_sha256"] = digest(method)
             if version_key(visit) in versions:
                 platform = _hardware(visit)
@@ -285,14 +318,21 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
                     raise ValueError("Selected versions have incompatible frequency, duration, marker or acquisition settings.")
                 signature = method
                 selected_setup = setup
+                selection = _visit_selection(source, visit)
         matches[key] = entry
     if selected_setup is None:
+        selections = set()
         for row in review.rows:
             if version_key(row.visit) in versions and not row.problem and row.visit.get("setup_id"):
-                selected_setup = source["setups"][row.visit["setup_id"]]
-                recording = row.visit["recording"]
-                signature = (_method(selected_setup), recording.get("selected_backend"), recording.get("acquisition_profile"))
-                break
+                selections.add(_visit_selection(source, row.visit))
+                if selected_setup is None:
+                    if _hardware(row.visit) != hardware:
+                        raise ValueError("Selected visit hardware conflicts with the project recording system.")
+                    selected_setup = source["setups"][row.visit["setup_id"]]
+                    selection = _visit_selection(source, row.visit)
+                    signature = _visit_method(source, row.visit)
+        if len(selections) > 1:
+            raise ValueError("The selected visits have incompatible electrode montages.")
         if selected_setup is None:
             raise ValueError("The selected version has no supported as-run setup for this project.")
     for key, entry in review.prior.get("visits", {}).items():
@@ -317,7 +357,7 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
         "versions": sorted(versions), "mixed_version_confirmations": list(warnings) if len(versions) > 1 else [],
         "visits": matches, "source_sha256": imported.source_sha256,
     }
-    return state, selected_setup
+    return state, selected_setup, selection
 
 
 def selected_recording_ids(manifest: Mapping[str, Any] | None) -> set[str] | None:
@@ -331,24 +371,31 @@ def selected_recording_ids(manifest: Mapping[str, Any] | None) -> set[str] | Non
 
 
 def commit_study_review(projects_root, imported, review, *, decisions, omissions, versions,
-                        warnings=(), hardware, existing=None, group_assignments=None):
+                        warnings=(), hardware=None, existing=None, group_assignments=None):
     """Publish exactly the reviewed change, preserving source files and older receipts."""
     from Main_App.io.atomic_write import rename_with_retry
     from Main_App.projects.fpvs_config_import import _create_imported_project, _unique_project_root
     from Main_App.projects.project import Project
 
+    if hardware is None:
+        if existing:
+            hardware = existing.preprocessing["hardware_platform"]
+        elif imported.study_recording_platform:
+            hardware = imported.study_recording_platform
+        else:
+            raise ValueError("Select the project recording system for this study.")
     if review_study(imported, review.folder, existing, hardware=hardware).files != review.files:
         raise ValueError("The EEG folder changed after review. Reopen the roster to check its matches.")
-    state, setup = _reviewed_state(imported, review, decisions, omissions, versions, warnings, hardware)
+    state, setup, selection = _reviewed_state(imported, review, decisions, omissions, versions, warnings, hardware)
     if existing:
-        return _publish(existing.project_root, imported, review, state, setup, hardware, group_assignments or {})
+        return _publish(existing.project_root, imported, review, state, setup, hardware, group_assignments or {}, selection)
     root = Path(projects_root).resolve()
     root.mkdir(exist_ok=True, parents=True)
     with tempfile.TemporaryDirectory(prefix=".studio-import-", dir=root) as staging:
         work = Path(staging) / "project"
         work.mkdir()
-        _create_imported_project(work, imported)
-        _publish(work, imported, review, state, setup, hardware, {})
+        _create_imported_project(work, replace(imported, recording_selection=selection))
+        _publish(work, imported, review, state, setup, hardware, {}, selection)
         from Main_App.projects.manifest_store import project_manifest_transaction
         with project_manifest_transaction(root / f".studio-import-{state['study_id']}"):
             if find_study_project(root, state["study_id"]) is not None:
@@ -399,7 +446,7 @@ def _register_reviewed_visits(manifest, current, state, folder, group_assignment
                          source_id=source, raw_file=str(folder / visit["raw_file"]))
 
 
-def _publish(root, imported, review, state, setup, hardware, group_assignments):
+def _publish(root, imported, review, state, setup, hardware, group_assignments, selection):
     from Main_App.io.atomic_write import atomic_write, replace_with_retry
     from Main_App.processing.raw_registration_state import registration_tool_updates
     from Main_App.projects.fpvs_config_import import _import_setup
@@ -414,9 +461,11 @@ def _publish(root, imported, review, state, setup, hardware, group_assignments):
             raise ValueError("Project changed after review. Reopen the whole-study handoff.")
         manifest = json.loads(current_bytes)
         previous = manifest.get("tools", {}).get(NAMESPACE, {})
-        if previous and all(previous.get(key) == value for key, value in state.items()):
-            return Project.load(root)
         current = Project(root, manifest)
+        if selection and (selection.platform != hardware or previous and not selection.matches(current.preprocessing)):
+            raise ValueError(f"Studio montage {selection.label} conflicts with the project recording settings.")
+        if previous and all(previous.get(key) == value for key, value in state.items()):
+            return current
         registry = manifest.setdefault("tools", {})
         history = list(previous.get("history", ()))
         if previous:
@@ -428,7 +477,8 @@ def _publish(root, imported, review, state, setup, hardware, group_assignments):
         if not previous:
             manifest["groups"] = {"cohort": {"label": "Study cohort", "folder_name": "Cohort",
                                               "raw_input_folder": str(review.folder)}}
-            manifest["preprocessing"] = confirm_hardware_selection(current.preprocessing, hardware, confirmed_change=True)
+            manifest["preprocessing"] = (selection.apply(current.preprocessing) if selection else
+                                         confirm_hardware_selection(current.preprocessing, hardware, confirmed_change=True))
         method_sha256 = digest(_method(setup))
         if not previous or previous.get("method_sha256") != method_sha256:
             scientific = _import_setup(setup, Path(imported.source_filename), b"")
