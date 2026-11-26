@@ -1251,7 +1251,10 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             _reset_failed_start(host)
             return
 
+        from Main_App.processing.pipeline_plan import PREPARED_RAW_QC_BY_FILE
+
         settings = host.validated_params.copy()
+        host.validated_params.pop(PREPARED_RAW_QC_BY_FILE, None)
         event_map = settings.pop("event_id_map", {})
         raw_file_infos = list(getattr(host, "_processing_raw_file_infos", []) or [])
         plan = host._validated_unchanged_plan
@@ -1306,6 +1309,7 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
             missing = additional_preflight_infos_for_chosen_scope(chosen_plan, settings)
             if not missing:
                 break
+        prepared_raw_qc = settings.pop(PREPARED_RAW_QC_BY_FILE, None)
         host.validated_params = dict(settings)
         if not _prepare_excel_outputs_for_plan(
             host,
@@ -1442,6 +1446,8 @@ def start_processing(host: Any, *, log: logging.Logger = logger) -> None:
                 settings, event_map, chosen_plan, save_folder,
             )
         )
+        if prepared_raw_qc:
+            settings[PREPARED_RAW_QC_BY_FILE] = prepared_raw_qc
         host._mp.start(
             project_root=project_root,
             data_files=files,

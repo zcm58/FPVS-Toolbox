@@ -19,6 +19,8 @@ from Main_App.processing.condition_interpolation_state import (
     reconcile_condition_interpolation_sources,
     project_processing_identity,
 )
+from Main_App.processing.pipeline_plan import PREPARED_RAW_QC_BY_FILE
+
 
 SNAPSHOT_VERSION = "condition_interpolation_run_snapshot_v1"
 
@@ -62,7 +64,8 @@ def build_condition_interpolation_run_snapshot(settings, event_map, plan, save_f
         records.append(record)
     return {
         "version": SNAPSHOT_VERSION,
-        "settings": _json_value(settings), "event_map": dict(event_map),
+        "settings": _json_value({key: value for key, value in settings.items() if key != PREPARED_RAW_QC_BY_FILE}),
+        "event_map": dict(event_map),
         "processing_fingerprint": plan.fingerprint,
         "save_folder": str(save_folder), "records": records,
     }

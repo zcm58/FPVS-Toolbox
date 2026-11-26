@@ -163,3 +163,19 @@ def test_prepared_result_does_not_replace_a_registered_detector(recording, prepa
     assert reuse.restore_raw_channel_qc(prepared, raw, settings, source, spans) is None
     assert evaluate_raw_channel_qc(raw, settings, filename=source.name, analysis_spans=spans) is prepared.result
     assert calls == [True]
+
+
+def test_worker_handoff_does_not_enter_persisted_run_snapshot(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from Main_App.processing.condition_interpolation_executor import build_condition_interpolation_run_snapshot
+
+    plan = SimpleNamespace(run_files=(), states=(), fingerprint="scientific-fingerprint")
+    settings = {"raw_signal_screening_enabled": True}
+    event_map = {"Condition": 1}
+    baseline = build_condition_interpolation_run_snapshot(settings, event_map, plan, tmp_path)
+    with_handoff = build_condition_interpolation_run_snapshot(
+        {**settings, PREPARED_RAW_QC_BY_FILE: {"one.bdf": object()}}, event_map, plan, tmp_path,
+    )
+    assert json.dumps(with_handoff, allow_nan=False) == json.dumps(baseline, allow_nan=False)
