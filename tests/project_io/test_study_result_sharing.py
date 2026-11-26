@@ -3,7 +3,10 @@
 import csv
 import hashlib
 import io
+import json
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pandas as pd
@@ -13,9 +16,9 @@ from Main_App.exports import analysis_ready_workbook as audit
 from Main_App.exports.reporting_csv import export_reporting_csv
 from Main_App.processing import artifact_freshness, expected_processing_ledger, processing_ledger, roi_coverage
 from Main_App.projects.project import Project
-from Main_App.reporting import client
+from Main_App.reporting import client, publish
 from Main_App.reporting.provenance import reporting_scope
-from Main_App.reporting.snapshots import load_snapshot, queue_snapshot, read_state, save_scope
+from Main_App.reporting.snapshots import SNAPSHOT_DIRECTORY, load_snapshot, queue_snapshot, read_state, save_scope, state_path
 
 
 @pytest.fixture
@@ -162,11 +165,141 @@ def test_private_full_audit_to_lab_scoped_retry(released):
         keys = ("study_id", "dataset_id", "snapshot_id", "snapshot_sha256")
         return {"schema_version": "1.0", "status": "accepted", **{key: payload["manifest"][key] for key in keys}}
 
-    assert client.deliver_pending(root, store=store, transport=accept, retry=True) == "delivered"
+    assert client.deliver_pending(root, expected_scope=scope, store=store, transport=accept, retry=True) == "delivered"
     assert read_state(root)["pending"] == []
     assert load_snapshot(root, file.stem) == original
     with pytest.raises(ValueError, match="already accepted"):
         queue_snapshot(root, manifest, results_csv)
+
+
+@pytest.mark.parametrize("mismatch", [
+    "displayed", "live", "outbox_scope", "snapshot_scope", "outbox_dataset", "live_during_snapshot_read",
+])
+def test_retry_checks_all_destinations_before_accessing_credentials(released, mismatch, monkeypatch):
+    root, project, cohort, *_ = released
+    displayed = reporting_scope(project)
+    save_scope(root, displayed, {"approval_status": "approved", "upload_enabled": True})
+    manifest, csv_text = export_reporting_csv(root, displayed)
+    queued = queue_snapshot(root, manifest, csv_text)
+    original_request = queued.read_bytes()
+    state = read_state(root)
+    changed_scope = {**displayed, "experiment_version": "2.0"}
+    if mismatch == "displayed":
+        displayed = changed_scope
+    elif mismatch == "live":
+        cohort["website_study"]["project_id"] = str(uuid4())
+    elif mismatch == "outbox_scope":
+        state["scope"] = changed_scope
+    elif mismatch == "snapshot_scope":
+        cohort["website_study"]["experiment_version"] = "2.0"
+        displayed = changed_scope
+        state["scope"] = changed_scope
+    elif mismatch == "live_during_snapshot_read":
+        def load_before_project_restore(*args):
+            payload = load_snapshot(*args)
+            cohort["website_study"]["experiment_version"] = "2.0"
+            return payload
+
+        monkeypatch.setattr(client, "load_snapshot", load_before_project_restore)
+    else:
+        state["dataset_id"] = str(uuid4())
+    state_path(root).write_text(json.dumps(state), encoding="utf-8")
+    store, transport = Mock(), Mock()
+    with pytest.raises(client.ReportingError, match="snapshot_scope_conflict"):
+        client.deliver_pending(root, expected_scope=displayed, store=store, transport=transport, retry=True)
+    store.load.assert_not_called()
+    transport.assert_not_called()
+    assert read_state(root) == state and queued.read_bytes() == original_request
+
+
+@pytest.mark.parametrize("when_changed", ["before_share", "during_export", "dataset_during_export"])
+def test_share_refuses_changed_destination_before_queue_or_delivery(released, monkeypatch, when_changed):
+    root, project, cohort, *_ = released
+    displayed = reporting_scope(project)
+    save_scope(root, displayed, {"approval_status": "approved", "upload_enabled": True})
+    if when_changed == "before_share":
+        cohort["website_study"]["experiment_version"] = "2.0"
+        exporter = Mock(side_effect=AssertionError("Should refuse before exporting"))
+    else:
+        def changed_after_export(*args):
+            result = export_reporting_csv(*args)
+            if when_changed == "during_export":
+                cohort["website_study"]["experiment_version"] = "2.0"
+            else:
+                state = read_state(root)
+                state["dataset_id"] = str(uuid4())
+                state_path(root).write_text(json.dumps(state), encoding="utf-8")
+            return result
+
+        exporter = Mock(side_effect=changed_after_export)
+    monkeypatch.setattr(publish, "export_reporting_csv", exporter)
+    deliver = Mock()
+    monkeypatch.setattr(publish, "deliver_pending", deliver)
+    with pytest.raises(ValueError):
+        publish.publish_current(root, expected_scope=displayed)
+    if when_changed == "before_share":
+        exporter.assert_not_called()
+    else:
+        exporter.assert_called_once_with(root, displayed)
+    deliver.assert_not_called()
+    assert read_state(root)["pending"] == []
+    assert not list((root / SNAPSHOT_DIRECTORY).glob("*.json"))
+
+
+def test_brainvision_reporting_requires_matching_reviewed_companions(released):
+    from Main_App.io.recording_sources import companion_identity
+
+    root, project, cohort, execution, _ = released
+    scope = reporting_scope(project)
+    raw = root / "raw"
+    raw.mkdir()
+    header = raw / "private.vhdr"
+    header.write_text("[Common Infos]\nDataFile=private.eeg\nMarkerFile=private.vmrk\n", encoding="utf-8")
+    (raw / "private.vmrk").write_text("[Common Infos]\nDataFile=private.eeg\n", encoding="utf-8")
+    data = raw / "private.eeg"
+    data.write_bytes(b"synthetic")
+    visit = cohort["visits"][execution]
+    visit["raw_file"] = header.name
+    visit["file_identity"] = [header.stat().st_size, header.stat().st_mtime_ns]
+    record = expected_processing_ledger.load_expected_recording_condition_plan(root).recordings[0]
+    record.raw_file_identity.update(
+        raw_file=str(header), raw_size=visit["file_identity"][0], raw_mtime_ns=visit["file_identity"][1],
+    )
+    entry = processing_ledger.load_ledger(root)["entries"][record.recording_id]
+    entry.update(record.raw_file_identity)
+    with pytest.raises(ValueError, match="(?i)review"):
+        export_reporting_csv(root, scope)
+
+    from Main_App.reporting.electrode_exclusions import build_electrode_exclusions
+    plan = expected_processing_ledger.load_expected_recording_condition_plan(root)
+    excluded = {**entry, "status": "excluded", "exclusion_reason": "all_conditions_excluded_from_analysis"}
+    evidence = build_electrode_exclusions(project, plan, {record.processing_id: excluded}, str(uuid4()), set())
+    assert evidence["recordings"][0]["studio_evidence_source"] == "unknown"
+    assert evidence["recordings"][0]["toolbox_interpolated_electrodes"] is None
+
+    components = companion_identity(header)
+    visit.update(components)
+    record.raw_file_identity.update(components)
+    entry.update(components)
+    hashes = {row["path"]: hashlib.sha256(Path(row["path"]).read_bytes()).hexdigest()
+              for row in components["recording_sources"]}
+    with pytest.raises(ValueError, match="(?i)review"):
+        export_reporting_csv(root, scope)
+    visit["source_sha256_by_file"] = hashes
+    with pytest.raises(ValueError, match="Reprocess"):
+        export_reporting_csv(root, scope)
+    entry["source_sha256_by_file"] = {**hashes, str(data): "0" * 64}
+    with pytest.raises(ValueError, match="Reprocess"):
+        export_reporting_csv(root, scope)
+    entry["source_sha256_by_file"] = dict(hashes)
+    manifest, _ = export_reporting_csv(root, scope)
+    assert manifest["electrode_exclusions"]["recordings"][0]["studio_execution_id"] == execution
+    assert str(header) not in str(manifest) and hashes[str(data)] not in str(manifest)
+    data.write_bytes(b"new synthetic data")
+    record.raw_file_identity.update(companion_identity(header))
+    entry.update(record.raw_file_identity)
+    with pytest.raises(ValueError, match="review"):
+        export_reporting_csv(root, scope)
 
 
 def test_release_and_recognized_research_visits_are_required(released):

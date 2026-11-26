@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import stat
 import tempfile
 from threading import Event
 from zipfile import BadZipFile, ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
-from Main_App.io.atomic_write import rename_with_retry
+from Main_App.io.atomic_write import atomic_write, rename_with_retry, replace_with_retry
 from Main_App.io.safe_file import regular_file_info
 from Main_App.projects.grouping import GroupConfigurationError, validate_group_folder_name
 from Main_App.projects.manifest_store import project_manifest_transaction
@@ -32,6 +34,7 @@ from Main_App.projects.public_datasets import (
 
 _MANIFEST = "dataset-manifest.json"
 _RECEIPT = ".openfpvs-dataset.json"
+_RECORDING_PATH_VALIDATION = "packaged_bdf_v1"
 _JSON_LIMIT = 2 * 1024 * 1024
 _DATA_SUFFIXES = {".bdf", ".json", ".csv", ".tsv", ".md", ".txt", ".png", ".pdf", ".xlsx", ".cff"}
 _RELEASE_IDENTITY = (
@@ -40,6 +43,7 @@ _RELEASE_IDENTITY = (
 )
 ProgressCallback = Callable[[int, int], None]
 PhaseCallback = Callable[[str], None]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -78,11 +82,24 @@ def _json(data: bytes, label: str) -> dict:
         raise LibraryError(f"The dataset {label} exceeds its size limit.")
     try:
         value = json.loads(data)
-    except (ValueError, UnicodeError) as error:
+    except (ValueError, UnicodeError, RecursionError) as error:
         raise LibraryError(f"The dataset {label} is unreadable.") from error
     if not isinstance(value, dict):
         raise LibraryError(f"The dataset {label} must contain a JSON object.")
     return value
+
+
+def _read_local_json(path: Path, label: str, expected: os.stat_result) -> dict:
+    with path.open("rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not os.path.samestat(opened, expected):
+            raise LibraryError(f"The dataset {label} changed while opening.")
+        if opened.st_size > _JSON_LIMIT:
+            raise LibraryError(f"The dataset {label} exceeds its size limit.")
+        data = stream.read(opened.st_size + 1)
+        if len(data) != opened.st_size:
+            raise LibraryError(f"The dataset {label} changed while reading.")
+        return _json(data, label)
 
 
 def _hash_file(path: Path, cancel_event: Event | None) -> tuple[int, str]:
@@ -149,6 +166,79 @@ def _validate_project_paths(document: dict, files: Mapping[str, ZipInfo], item: 
         raw_file = _portable_path(participant.get("raw_file"))
         if raw_file not in files or Path(raw_file).suffix.lower() != ".bdf":
             raise LibraryError("A dataset participant references a missing BDF recording.")
+    _validate_recording_paths(document, files)
+
+
+def _validate_recording_paths(document: Mapping, files: Collection[str], *, installed_root: Path | None = None) -> None:
+    def recording_path(value, *, allow_root=False):
+        if installed_root is None:
+            return _portable_path(value, allow_root=allow_root)
+        if not isinstance(value, str) or not value or len(value) > 1024:
+            raise LibraryError("The installed recording path is invalid.")
+        # A local save uses native separators and may contain an absolute path.
+        # Reject an outside path lexically before resolving any links.
+        path = Path(value)
+        if path.is_absolute():
+            try:
+                path = path.relative_to(installed_root)
+            except ValueError as error:
+                raise LibraryError("A recording path leaves the installed dataset.") from error
+        name = _portable_path(path.as_posix(), allow_root=allow_root)
+        if name.startswith("~") or not (installed_root / path).resolve().is_relative_to(installed_root):
+            raise LibraryError("A recording path leaves the installed dataset.")
+        return name
+
+    sources = document.get("recording_sources", {})
+    recordings = document.get("recordings", {})
+    if sources is None:
+        sources = {}
+    if recordings is None:
+        recordings = {}
+    if not isinstance(sources, dict) or not isinstance(recordings, dict):
+        raise LibraryError("The dataset's recording sources or recording metadata are invalid.")
+    if sources:
+        bdf_directories = {
+            str(parent) for name in files if name.lower().endswith(".bdf")
+            for parent in PurePosixPath(name).parents
+        }
+        for source in sources.values():
+            if not isinstance(source, dict):
+                raise LibraryError("The dataset contains invalid recording source metadata.")
+            folder = recording_path(source.get("raw_input_folder"), allow_root=True)
+            if folder.startswith("~") or folder not in bdf_directories:
+                raise LibraryError("A dataset recording source must refer to a folder of packaged BDF files.")
+    for recording in recordings.values():
+        if not isinstance(recording, dict):
+            raise LibraryError("The dataset contains invalid recording metadata.")
+        raw_file = recording_path(recording.get("raw_file"))
+        if raw_file.startswith("~") or raw_file not in files or not raw_file.lower().endswith(".bdf"):
+            raise LibraryError("A dataset recording must refer to a packaged BDF file.")
+
+
+def _file_inventory(document: dict, item: PublicDataset, manifest_size: int) -> dict[str, DatasetFile]:
+    if (set(document) != {"schema_version", "item_id", "version", "project_file", "files"}
+            or document["schema_version"] != "1.0" or document["item_id"] != item.item_id
+            or document["version"] != item.version or document["project_file"] != "project.json"
+            or not isinstance(document["files"], list) or len(document["files"]) != item.file_count - 1):
+        raise LibraryError("The dataset file manifest does not match the selected release.")
+    expected: dict[str, DatasetFile] = {}
+    seen = {_MANIFEST.casefold(), _RECEIPT.casefold()}
+    for row in document["files"]:
+        if not isinstance(row, dict) or set(row) != {"path", "size_bytes", "sha256"}:
+            raise LibraryError("The dataset file manifest contains an invalid entry.")
+        name = _portable_path(row["path"])
+        if name.casefold() in seen:
+            raise LibraryError("The dataset file manifest contains duplicate or reserved paths.")
+        seen.add(name.casefold())
+        if type(row["size_bytes"]) is not int or row["size_bytes"] < 0:
+            raise LibraryError("The dataset file manifest contains an invalid file size.")
+        checksum = row["sha256"]
+        if not isinstance(checksum, str) or len(checksum) != 64 or any(c not in "0123456789abcdef" for c in checksum):
+            raise LibraryError("The dataset file manifest contains an invalid checksum.")
+        expected[name] = DatasetFile(name, row["size_bytes"], checksum)
+    if "project.json" not in expected or sum(row.size_bytes for row in expected.values()) + manifest_size != item.uncompressed_size_bytes:
+        raise LibraryError("The dataset file manifest does not cover the complete archive.")
+    return expected
 
 
 def validate_dataset_archive(
@@ -172,34 +262,19 @@ def validate_dataset_archive(
             if _MANIFEST not in files or files[_MANIFEST].file_size > _JSON_LIMIT:
                 raise LibraryError("The dataset is missing its bounded file manifest.")
             manifest_bytes = zipped.read(_MANIFEST)
-            document = _json(manifest_bytes, "file manifest")
-            if (set(document) != {"schema_version", "item_id", "version", "project_file", "files"}
-                    or document["schema_version"] != "1.0" or document["item_id"] != item.item_id
-                    or document["version"] != item.version or document["project_file"] != "project.json"
-                    or not isinstance(document["files"], list)):
-                raise LibraryError("The dataset file manifest does not match the selected release.")
-            expected: dict[str, DatasetFile] = {}
-            for row in document["files"]:
-                if not isinstance(row, dict) or set(row) != {"path", "size_bytes", "sha256"}:
-                    raise LibraryError("The dataset file manifest contains an invalid entry.")
-                name = _portable_path(row["path"])
-                if name == _MANIFEST or name in expected or name not in files:
-                    raise LibraryError("The dataset file manifest contains duplicate or missing files.")
-                if type(row["size_bytes"]) is not int or row["size_bytes"] != files[name].file_size:
+            expected = _file_inventory(_json(manifest_bytes, "file manifest"), item, len(manifest_bytes))
+            if set(expected) != set(files) - {_MANIFEST}:
+                raise LibraryError("The dataset file manifest does not cover the complete archive.")
+            for name, row in expected.items():
+                if row.size_bytes != files[name].file_size:
                     raise LibraryError("A dataset file size differs from its file manifest.")
-                checksum = row["sha256"]
-                if not isinstance(checksum, str) or len(checksum) != 64 or any(c not in "0123456789abcdef" for c in checksum):
-                    raise LibraryError("The dataset file manifest contains an invalid checksum.")
                 digest = hashlib.sha256()
                 with zipped.open(name) as source:
                     while chunk := source.read(CHUNK_SIZE):
                         check_cancel(cancel_event)
                         digest.update(chunk)
-                if digest.hexdigest() != checksum:
+                if digest.hexdigest() != row.sha256:
                     raise LibraryError(f"Dataset file verification failed for {name}.")
-                expected[name] = DatasetFile(name, row["size_bytes"], checksum)
-            if set(expected) != set(files) - {_MANIFEST} or "project.json" not in expected:
-                raise LibraryError("The dataset file manifest does not cover the complete archive.")
             if files["project.json"].file_size > _JSON_LIMIT:
                 raise LibraryError("The dataset project manifest exceeds its size limit.")
             _validate_project_paths(_json(zipped.read("project.json"), "project manifest"), files, item)
@@ -214,6 +289,82 @@ def _installation_root(item: PublicDataset, projects_root: Path) -> Path:
     return Path(projects_root).resolve() / f"{item.item_id}-{item.version}"
 
 
+def _installed_document(path: Path, label: str) -> dict:
+    info = regular_file_info(path)
+    if info is None:
+        raise LibraryError(f"The existing dataset installation is missing its {label}.")
+    return _read_local_json(path, label, info)
+
+
+def _receipt_release(saved: dict) -> PublicDataset:
+    item = PublicDataset.from_dict(saved.get("dataset"))
+    if saved.get("schema_version") != "1.0":
+        raise LibraryError("The Library installation receipt uses an unsupported format.")
+    return item
+
+
+def _check_legacy_recordings(
+    target: Path, saved: dict, manifest_path: Path, manifest: Mapping | None,
+) -> Mapping | None:
+    if saved.get("recording_path_validation") == _RECORDING_PATH_VALIDATION:
+        return manifest
+    # Protect the current on-disk manifest even when the caller also supplied
+    # a draft or alternate manifest. Only the receipt is modified.
+    project = target / "project.json"
+    receipt = target / _RECEIPT
+    with project_manifest_transaction(project):
+        saved = _installed_document(receipt, "installation receipt")
+        item = _receipt_release(saved)
+        if saved.get("recording_path_validation") == _RECORDING_PATH_VALIDATION:
+            return manifest
+        inventory = target / _MANIFEST
+        info = regular_file_info(inventory)
+        if info is None:
+            raise LibraryError("The old Library project requires its original dataset-manifest.json to reopen.")
+        files = _file_inventory(_read_local_json(inventory, "file manifest", info), item, info.st_size)
+        current = _installed_document(project, "project manifest")
+        try:
+            _validate_recording_paths(current, files, installed_root=target)
+            if manifest is None and manifest_path != project:
+                manifest = _installed_document(manifest_path, "project manifest")
+            if manifest is not None:
+                if not isinstance(manifest, Mapping):
+                    raise LibraryError("The project manifest must contain a JSON object.")
+                _validate_recording_paths(manifest, files, installed_root=target)
+        except LibraryError as error:
+            raise LibraryError(
+                f"{error} Keep a backup of this project. In project.json, use the BDF paths listed "
+                "in dataset-manifest.json and their folders. Reopen the project, then register any "
+                "trusted external recordings again."
+            ) from error
+        saved["recording_path_validation"] = _RECORDING_PATH_VALIDATION
+        with atomic_write(receipt, replace=replace_with_retry) as stream:
+            json.dump(saved, stream, indent=2)
+        return current if manifest is None else manifest
+
+
+def checked_library_project_manifest(target: Path, manifest_path: Path, manifest: Mapping | None) -> Mapping | None:
+    """Admit an older public installation before the project model resolves external paths."""
+    saved = _installed_document(target / _RECEIPT, "installation receipt")
+    _receipt_release(saved)
+    return _check_legacy_recordings(target, saved, manifest_path, manifest)
+
+
+def _installed_release(target: Path) -> PublicDataset | None:
+    receipt = target / _RECEIPT
+    info = regular_file_info(receipt)
+    if info is None:
+        return None
+    saved = _read_local_json(receipt, "installation receipt", info)
+    item = _receipt_release(saved)
+    if target.with_name(f"{item.item_id}-{item.version}") != target:
+        raise LibraryError("The folder name differs from the installed dataset identity.")
+    project = target / "project.json"
+    if _check_legacy_recordings(target, saved, project, None) is None:
+        _installed_document(project, "project manifest")
+    return item
+
+
 def installed_dataset_path(item: PublicDataset, projects_root: Path) -> Path | None:
     """Resolve a completed installation without rehashing editable project files."""
     item = PublicDataset.from_dict(item.to_dict())
@@ -223,38 +374,34 @@ def installed_dataset_path(item: PublicDataset, projects_root: Path) -> Path | N
     info = target.lstat()
     if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise LibraryError("The existing dataset project folder is linked or invalid.")
-    receipt = target / _RECEIPT
-    if regular_file_info(receipt) is None or receipt.stat().st_size > _JSON_LIMIT:
+    saved_item = _installed_release(target)
+    if saved_item is None:
         raise LibraryError(f"The existing project folder {target.name} is not a completed Library installation.")
-    saved = _json(receipt.read_bytes(), "installation receipt")
-    saved_item = PublicDataset.from_dict(saved.get("dataset"))
-    if (saved.get("schema_version") != "1.0"
-            or any(getattr(saved_item, key) != getattr(item, key) for key in _RELEASE_IDENTITY)
-            or regular_file_info(target / "project.json") is None):
+    if any(getattr(saved_item, key) != getattr(item, key) for key in _RELEASE_IDENTITY):
         raise LibraryError("The existing dataset installation does not match this public release.")
-    _json((target / "project.json").read_bytes(), "project manifest")
     return target
 
 
-def list_installed_datasets(projects_root: Path) -> tuple[PublicDataset, ...]:
+def list_installed_datasets(
+    projects_root: Path, *, on_notice: Callable[[str], None] | None = None,
+) -> tuple[PublicDataset, ...]:
     """Discover completed local releases independently of online availability."""
     root = Path(projects_root).resolve()
     if not root.is_dir():
         return ()
     items: list[PublicDataset] = []
     for child in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
-        info = child.lstat()
-        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-            continue
-        receipt = child / _RECEIPT
-        if regular_file_info(receipt) is None:
-            continue
-        if receipt.stat().st_size > _JSON_LIMIT:
-            raise LibraryError(f"The Library receipt in {child.name} exceeds its size limit.")
-        item = PublicDataset.from_dict(_json(receipt.read_bytes(), "installation receipt").get("dataset"))
-        if installed_dataset_path(item, root) != child:
-            raise LibraryError(f"The Library project in {child.name} has an unexpected folder name.")
-        items.append(item)
+        try:
+            info = child.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                continue
+            item = _installed_release(child)
+            if item is not None:
+                items.append(item)
+        except (LibraryError, OSError) as error:
+            logger.warning("library_installation_unreadable", extra={"folder": child.name, "reason": str(error)})
+            if on_notice is not None:
+                on_notice(f"Cannot reopen {child.name}. {error}")
     return tuple(items)
 
 
@@ -339,7 +486,10 @@ def install_public_dataset(
             from Main_App.projects import Project
 
             Project.load(content)
-            receipt = {"schema_version": "1.0", "dataset": item.to_dict(), "origin": origin}
+            receipt = {
+                "schema_version": "1.0", "dataset": item.to_dict(), "origin": origin,
+                "recording_path_validation": _RECORDING_PATH_VALIDATION,
+            }
             (content / _RECEIPT).write_text(json.dumps(receipt, indent=2), encoding="utf-8")
             check_cancel(cancel_event)
             if target.exists() or target.is_symlink():

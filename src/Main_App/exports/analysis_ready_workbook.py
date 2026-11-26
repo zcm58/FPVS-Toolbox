@@ -1938,6 +1938,8 @@ def _format_workbook(workbook: Any) -> None:
         widths = [len(str(cell.value or "")) for cell in headers]
         number_formats = []
         for cell in headers:
+            if cell.data_type in {"f", "e"}:
+                cell.data_type = "s"
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = alignment
@@ -1958,6 +1960,10 @@ def _format_workbook(workbook: Any) -> None:
         for row_number, row in enumerate(rows, start=2):
             striped = row_number % 2 == 0
             for column_index, cell in enumerate(row):
+                # These frames contain calculated numbers and literal metadata.
+                # openpyxl otherwise infers formulas and Excel errors from text.
+                if cell.data_type in {"f", "e"}:
+                    cell.data_type = "s"
                 number_format = number_formats[column_index]
                 # Reuse the complete derived style, retaining any existing
                 # pandas date, font, border, or protection settings.

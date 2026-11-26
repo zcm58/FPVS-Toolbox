@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import re
+from Main_App.projects.studio_recording_identity import require_studio_source_hashes
 from Main_App.reporting.provenance import recording_identity
 from Main_App.processing.preprocessing_outcome import normalize_preprocessing_outcome
 
@@ -100,17 +101,36 @@ def build_electrode_exclusions(project, plan, entries: Mapping, dataset_id: str,
         if entry is None and identity["recording_id"] in analyzed:
             raise ValueError("A released recording is missing its matching processing ledger evidence.")
         match = matched.get(recording.recording_id)
+        raw_path = Path(recording.raw_file_identity["raw_file"]) if match else None
+        brain_products = raw_path is not None and raw_path.suffix.lower() in {".vhdr", ".bvrh"}
+        if (match and brain_products and identity["recording_id"] not in analyzed and entry
+                and entry.get("status") == "excluded" and not entry.get("source_sha256_by_file")
+                and not match[1].get("source_sha256_by_file")):
+            # A historical exclusion can predate any read of the signal.
+            # Keep its roster coverage without attributing electrode evidence.
+            match = entry = None
         source, execution, studio_channels = "unknown", None, None
         if match:
             key, visit = match
+            sources = recording.raw_file_identity.get("recording_sources")
+            if brain_products:
+                approved = require_studio_source_hashes(visit.get("source_sha256_by_file"))
+                if (not isinstance(sources, list) or len(sources) != len(approved)
+                        or {row["path"] for row in sources if isinstance(row, Mapping)
+                            and isinstance(row.get("path"), str)} != approved.keys()):
+                    raise ValueError("The component files differ from the reviewed Studio recording.")
+                if entry is None or entry.get("source_sha256_by_file") != approved:
+                    if identity["recording_id"] in analyzed:
+                        raise ValueError("Reprocess the recording to bind the results to the reviewed Studio visit.")
+                    entry = None
             if (
                 key != visit["execution_id"]
                 or not re.fullmatch(r"[0-9a-f]{32}", key)
                 or recording.participant_id != visit["participant_number"]
-                or Path(recording.raw_file_identity["raw_file"]).resolve()
-                != (Path(cohort["raw_folder"]) / visit["raw_file"]).resolve()
+                or raw_path.resolve() != (Path(cohort["raw_folder"]) / visit["raw_file"]).resolve()
                 or [recording.raw_file_identity["raw_size"], recording.raw_file_identity["raw_mtime_ns"]]
                 != visit["file_identity"]
+                or sources != visit.get("recording_sources")
             ):
                 raise ValueError("A recording differs from the reviewed Studio visit. Review the cohort again.")
             source, execution = "completed_session", key

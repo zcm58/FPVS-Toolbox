@@ -78,6 +78,20 @@ def test_mobile_bids_rejects_observed_invalid_telemetry(tmp_path, channel, value
     assert not list((tmp_path / ".fpvs_cache" / "bids-import").glob("*/import.json"))
 
 
+def test_mobile_cache_requires_preserved_source_even_if_file_and_receipt_row_are_missing(tmp_path):
+    source = _fixture(tmp_path / "input.bdf")
+    settings = _project_settings(tmp_path)
+    prepared = prepare_bids_recording(source, project_root=tmp_path, settings=settings)
+    receipt = json.loads(prepared.manifest_path.read_bytes())
+    retained = prepared.dataset_root / "sourcedata" / receipt["subject"] / source.name
+    retained.unlink()
+    receipt["outputs"] = [row for row in receipt["outputs"] if "/sourcedata/" not in row["path"]]
+    prepared.manifest_path.write_text(json.dumps(receipt), encoding="utf-8")
+    repaired = prepare_bids_recording(source, project_root=tmp_path, settings=settings)
+    assert not repaired.reused
+    assert (repaired.dataset_root / "sourcedata" / receipt["subject"] / source.name).read_bytes() == source.read_bytes()
+
+
 def test_mobile_bids_normalizes_uppercase_status(tmp_path):
     source = _fixture(tmp_path / "input.bdf", unit="uV")
     data = bytearray(source.read_bytes())

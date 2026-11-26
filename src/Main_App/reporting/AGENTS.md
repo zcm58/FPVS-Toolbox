@@ -13,6 +13,12 @@ The operator decides when to send. Preserve scientific values, exact visit
 coverage, pseudonymous identifiers, explicit exclusions and unknown electrode
 evidence. A project must have an imported verified website link. Preserve a
 pending upload for exact retry and expose service conflicts.
+Before reading a retry credential, match the destination shown to the operator
+to the live project, saved reporting scope and immutable snapshot. Match the
+snapshot dataset ID to the outbox. For analyzed Brain Products visits, require
+the approved component SHA-256 values to match the local processing ledger and
+the reviewed component metadata to match the recording plan. Old results
+without admitted checksums require reprocessing. Keep the paths and digests local.
 
 Run `tests/project_io/test_study_result_sharing.py` offline. In an approved
 visible smoke, use a synthetic linked project to open **File → Share study

@@ -176,7 +176,7 @@ def read_brain_products_raw(
     overwrites source or existing files. Use ``open_brain_products_recording``
     when the caller needs deterministic memory-map closure.
     """
-    files = source_files(path)
+    files = source_files(path, native_paths=True)
     if not isinstance(preload, (bool, str)):
         raise TypeError("preload must be False, True, or a new memory-map filename.")
     if isinstance(preload, str):

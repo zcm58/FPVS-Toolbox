@@ -16,6 +16,7 @@ from Main_App.processing.expected_processing_ledger import (
 from Main_App.processing.processing_ledger import (
     ProcessingInputState,
     ProcessingPlan,
+    entry_matches_studio_approval,
     raw_file_metadata,
 )
 from Main_App.processing.recording_condition_outcomes import (
@@ -161,6 +162,22 @@ def unverified_completed_recordings(ledger: Mapping, states: list[ProcessingInpu
         if pins is not None and (completed or previous.retained_export_fingerprints.get(row.processing_id) == pins):
             missing.discard(row.processing_id)
     return missing
+
+
+def require_retained_studio_sources(processing_plan, prior_ledger, approvals, run_paths):
+    """Recheck the ledger read for this freeze before accepting any skipped decision."""
+    if not approvals:
+        return
+    entries = (prior_ledger or {}).get("entries", {})
+    for state in processing_plan.states:
+        if state.info.path.resolve(strict=False) in run_paths:
+            continue
+        entry = entries.get(state.processing_id) if isinstance(entries, Mapping) else None
+        if not entry_matches_studio_approval(approvals, state.info.path, entry if isinstance(entry, Mapping) else {}):
+            raise ExpectedRecordingConditionPlanError(
+                f"Prior processing evidence for {state.processing_id} differs from the approved Studio source. "
+                "Run Processing again."
+            )
 
 
 def bind_retained_recordings(

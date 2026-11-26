@@ -21,6 +21,26 @@ inline message and select **Try again**. An installed demo offers **Open project
 including when the public catalog is unavailable. Reopening preserves your
 local settings and processing outputs.
 
+Public packages must include the BDF files named by participant and
+repeated-session recording records. Each repeated-session source folder must
+refer to a directory containing packaged BDF data. Toolbox checks these
+references before it sets up the project.
+
+The first time Toolbox discovers or opens a project installed by an older
+Library version, it checks the repeated-session paths against the installed
+`dataset-manifest.json`. This check works offline, preserves local settings
+and processing outputs, and records success in the installation receipt.
+If an older project already refers to external recordings, keep a backup.
+In `project.json`, set the repeated-session recording files and source folders
+to BDF paths and directories listed in the package inventory. Reopen the
+project, then register your trusted external recordings again. Later local
+edits can use external sources as usual.
+
+During catalog discovery, Toolbox reads up to 2 MiB of JSON per installation
+receipt, project manifest, or legacy file inventory, with one extra byte to
+detect an overrun. If a local installation cannot be read, the Library
+identifies its folder and keeps other completed installations available offline.
+
 The project includes its 6 Hz base rate, 1.2 Hz oddball rate, condition markers
 and three repetitions per condition. Each 40-second run contains 48 oddballs.
 Toolbox's normal first-to-last-marker crop retains 45 complete cycles, giving

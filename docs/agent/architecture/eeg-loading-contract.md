@@ -40,7 +40,11 @@ both reads require the guarded path and reject a wider allocation.
 
 Imports live in `.fpvs_cache/bids-import/` beneath that project. Each immutable
 publication includes source/companion content hashes, metadata/settings identity,
-versioned import receipts, and hashes of generated files. Source changes or
+versioned import receipts, and hashes of generated files. Reuse requires
+unique, complete coverage of the files needed by the source representation,
+including the signal, sidecars, split FIF members and preserved originals.
+The expected subject and representation come from the source and import key.
+Source changes or
 damaged imports require a new publication. Concurrent callers publish distinct
 complete directories and never replace another reader's open files. Original
 recordings are not modified. Conversion and identity-validation times are
@@ -52,7 +56,12 @@ the preloaded samples are available or the lazy read context closes. Existing
 project imports remain available when retention is enabled again.
 
 BioSemi BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
-header/marker companion links are relocated. MNE-BIDS 0.16 loads these datasets
+header/marker companion links are relocated. Brain Products companions must
+resolve inside the selected header's directory tree, including when a link or
+junction is present. The BVCDF import reads metadata from the relocated copy,
+so native reader and checksum verification use the same signal and marker
+files. A recording with external companions must be assembled in one recording
+folder before admission. MNE-BIDS 0.16 loads these datasets
 using the pinned MNE 1.9 readers. Metadata normalization preserves source events,
 annotations, channel/sample identity, acquisition metadata and original subject
 fields. Internal BIDS identifiers must not replace canonical project identity

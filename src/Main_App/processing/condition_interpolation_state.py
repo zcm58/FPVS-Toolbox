@@ -13,6 +13,7 @@ import tempfile
 
 from Main_App.io.atomic_write import replace_with_retry
 from Main_App.projects import project_manifest_transaction
+from Main_App.projects.studio_recording_identity import studio_source_approval, studio_source_approvals
 
 STATE_KEY = "condition_electrode_interpolation"
 STATE_VERSION = "condition_electrode_interpolation_v1"
@@ -68,6 +69,7 @@ def queue_condition_interpolation_decisions(
 
     root_text = str(report.get("project_root") or "")
     entries = load_ledger(Path(root_text)).get("entries", {}) if root_text else {}
+    approvals = studio_source_approvals(manifest)
     channel_order = None
     canonical = {}
     changed: set[str] = set()
@@ -86,7 +88,11 @@ def queue_condition_interpolation_decisions(
         existing_identity = next((key for key in state["requests"] if key.casefold() == identity.casefold()), ledger_identity)
         entry = entries.get(ledger_identity, {})
         source = {key: entry[key] for key in ("raw_file", "raw_size", "raw_mtime_ns") if key in entry}
-        if not _source_is_current(source):
+        approved = studio_source_approval(approvals, source["raw_file"]) if source.get("raw_file") else None
+        if approved is not None:
+            source["source_sha256_by_file"] = entry.get("source_sha256_by_file")
+            source["recording_sources"] = entry.get("recording_sources")
+        if not _source_is_current(source, approvals):
             raise ValueError("The reviewed source recording changed or its identity is unavailable. Run Processing before requesting a repair.")
         previous_source = state["source_identities"].get(existing_identity)
         if previous_source is not None and previous_source != source:
@@ -137,16 +143,25 @@ def save_condition_interpolation_state(
         transaction.write_bytes(payload.encode("utf-8"))
 
 
-def _source_is_current(source: Mapping) -> bool:
+def _source_is_current(source: Mapping, approvals: Mapping | None = None) -> bool:
     try:
-        stat = Path(source["raw_file"]).stat()
+        path = Path(source["raw_file"])
+        approved = studio_source_approval(approvals, path)
+        if source.get("source_sha256_by_file") != approved:
+            return False
+        if approved is not None:
+            from Main_App.io.recording_sources import companion_identity
+
+            if source.get("recording_sources") != companion_identity(path).get("recording_sources"):
+                return False
+        stat = path.stat()
         return stat.st_size == source["raw_size"] and stat.st_mtime_ns == source["raw_mtime_ns"]
     except (KeyError, TypeError, OSError):
         return False
 
 
-def _source_matches_active_path(source: Mapping, identity: str, current_sources: Mapping | None) -> bool:
-    if not _source_is_current(source):
+def _source_matches_active_path(source: Mapping, identity: str, current_sources: Mapping | None, approvals) -> bool:
+    if not _source_is_current(source, approvals):
         return False
     if current_sources is None:
         return True
@@ -156,9 +171,14 @@ def _source_matches_active_path(source: Mapping, identity: str, current_sources:
 
 def active_condition_interpolation_requests(project_root: str | Path, *, current_sources: Mapping | None = None) -> dict:
     """Read-only source guard used by individual child processes."""
-    state = load_condition_interpolation_state(project_root)
+    path = Path(project_root) / "project.json"
+    if not path.exists():
+        return {}
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    state = _state_from_manifest(manifest)
+    approvals = studio_source_approvals(manifest) if state["requests"] else {}
     return {identity: requests for identity, requests in state["requests"].items()
-            if _source_matches_active_path(state["source_identities"].get(identity, {}), identity, current_sources)}
+            if _source_matches_active_path(state["source_identities"].get(identity, {}), identity, current_sources, approvals)}
 
 
 def reconcile_condition_interpolation_sources(project_root: str | Path, *, current_sources: Mapping | None = None) -> tuple[dict, list[str]]:
@@ -167,12 +187,14 @@ def reconcile_condition_interpolation_sources(project_root: str | Path, *, curre
     if not path.exists():
         return {}, []
     with project_manifest_transaction(path):
-        state = load_condition_interpolation_state(project_root)
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        state = _state_from_manifest(manifest)
+        approvals = studio_source_approvals(manifest) if state["requests"] else {}
         baseline = deepcopy(state)
         warnings = []
         for identity in list(state["requests"]):
             source = state["source_identities"].get(identity, {})
-            if _source_matches_active_path(source, identity, current_sources):
+            if _source_matches_active_path(source, identity, current_sources, approvals):
                 continue
             state["retired_requests"].append({
                 "processing_id": identity, "requests": state["requests"].pop(identity),
@@ -271,7 +293,11 @@ def completion_is_current(project_root: str | Path, identity: str, state: Mappin
         return False
     if completed.get("request_fingerprint") != request_fingerprint(requests):
         return False
-    if not _source_is_current(state.get("source_identities", {}).get(identity, {})):
+    source = state.get("source_identities", {}).get(identity, {})
+    approvals = {}
+    if Path(source.get("raw_file") or "").suffix.lower() in {".vhdr", ".bvrh"}:
+        approvals = studio_source_approvals(json.loads((Path(project_root) / "project.json").read_text(encoding="utf-8")))
+    if not _source_is_current(source, approvals):
         return False
     from Main_App.io.condition_data import condition_companion_identity
     from Main_App.io.spectral_data import spectral_companion_identity
@@ -280,6 +306,8 @@ def completion_is_current(project_root: str | Path, identity: str, state: Mappin
 
     entries = load_ledger(Path(project_root)).get("entries", {})
     entry = next((row for key, row in entries.items() if key.casefold() == identity.casefold()), {})
+    if source.get("source_sha256_by_file") is not None and entry.get("source_sha256_by_file") != source["source_sha256_by_file"]:
+        return False
     if completed.get("processing_fingerprint") != entry.get("processing_fingerprint"):
         return False
     try:

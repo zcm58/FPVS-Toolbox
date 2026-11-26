@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import mne
@@ -128,6 +129,78 @@ def test_focused_source_merge_rejects_changed_recording_before_writing(tmp_path)
             source_signature={"raw_size": 2}, merge_existing=True,
         )
     assert original.manifest_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["staging", "manifest"])
+def test_failed_focused_publication_preserves_complete_generation_for_retry(tmp_path, monkeypatch, failure):
+    options = dict(project_root=tmp_path, participant_id="P01", processing_provenance=_processing_provenance())
+    original = write_source_ready_time_domain_derivatives(
+        **options, condition_epochs={"A": _epochs(), "B": _epochs()},
+    )
+    paths = [original.manifest_path, *(p for a in original.artifacts for p in (a.sidecar_path, a.fif_path))]
+    before = {p: p.read_bytes() for p in paths}
+    focused = dict(**options, condition_epochs={"A": _epochs(scale=2)}, merge_existing=True,
+                   required_condition_labels=("A", "B"))
+    with monkeypatch.context() as patch:
+        replace_file = export_module._replace_file
+
+        def failing_replace(source, destination):
+            if (failure == "staging" and Path(source).name.endswith("_raw.fif")
+                    or failure == "manifest" and Path(destination) == original.manifest_path):
+                raise OSError("write interrupted")
+            replace_file(source, destination)
+
+        patch.setattr(export_module, "_replace_file", failing_replace)
+        with pytest.raises(OSError, match="write interrupted"):
+            write_source_ready_time_domain_derivatives(**focused)
+    assert {p: p.read_bytes() for p in paths} == before
+    retried = write_source_ready_time_domain_derivatives(**focused)
+    assert {a.condition_label for a in retried.artifacts} == {"A", "B"}
+    published = json.loads(retried.manifest_path.read_text(encoding="utf-8"))
+    assert published["complete"] and published["artifact_count"] == 2
+    assert {row["condition_label"] for row in published["artifacts"]} == {"A", "B"}
+    for artifact in retried.artifacts:
+        assert artifact.fif_sha256 == _sha256(artifact.fif_path)
+        assert artifact.sidecar_sha256 == _sha256(artifact.sidecar_path)
+        if artifact.condition_label == "B":
+            assert artifact.fif_path.read_bytes() == before[artifact.fif_path]
+            assert artifact.sidecar_path.read_bytes() == before[artifact.sidecar_path]
+
+
+def test_focused_publication_requires_a_complete_merge_base(tmp_path):
+    options = dict(project_root=tmp_path, participant_id="P01", processing_provenance=_processing_provenance(),
+                   condition_epochs={"A": _epochs()})
+    focused = dict(**options, merge_existing=True, required_condition_labels=("A", "B"))
+    with pytest.raises(ValueError, match="Regenerate all conditions"):
+        write_source_ready_time_domain_derivatives(**focused)
+    original = write_source_ready_time_domain_derivatives(**options)
+    before = original.manifest_path.read_bytes()
+    with pytest.raises(ValueError, match="missing an available condition"):
+        write_source_ready_time_domain_derivatives(**focused)
+    assert original.manifest_path.read_bytes() == before
+
+
+def test_simultaneous_condition_repairs_preserve_both_generations(tmp_path):
+    options = dict(project_root=tmp_path, participant_id="P01", processing_provenance=_processing_provenance())
+    original = write_source_ready_time_domain_derivatives(
+        **options, condition_epochs={"A": _epochs(), "B": _epochs()},
+    )
+    repairs = [{"A": _epochs(scale=2e-6)}, {"B": _epochs(scale=3e-6)}]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(write_source_ready_time_domain_derivatives, **options, condition_epochs=inputs,
+                        merge_existing=True, required_condition_labels=("A", "B"))
+            for inputs in repairs
+        ]
+        for future in futures:
+            future.result()
+    committed = json.loads(original.manifest_path.read_text(encoding="utf-8"))["artifacts"]
+    assert {item["condition_label"] for item in committed} == {"A", "B"}
+    prior = {a.condition_label: a.fif_sha256 for a in original.artifacts}
+    for item in committed:
+        assert item["fif_sha256"] != prior[item["condition_label"]]
+        assert item["fif_sha256"] == _sha256(tmp_path / item["fif_path"])
+        assert item["sidecar_sha256"] == _sha256(tmp_path / item["sidecar_path"])
 
 
 def test_export_writes_signed_eeg_mean_sidecar_and_commit_manifest(tmp_path: Path) -> None:

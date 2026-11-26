@@ -29,6 +29,7 @@ from Main_App.processing.analysis_spans import (
     realize_target_analysis_span_plan,
 )
 from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
+from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_path_key
 from Main_App.workers import process_runner
 
 
@@ -584,6 +585,7 @@ def test_run_full_pipeline_skips_loader_when_every_condition_is_excluded(
     assert result["status"] == "excluded"
     assert result["stage"] == "condition_scope"
     assert result["reason"] == "all_conditions_excluded_from_analysis"
+    assert "source_sha256_by_file" not in result
 
 
 def test_run_full_pipeline_scores_only_included_condition_spans(
@@ -1334,9 +1336,11 @@ def test_run_full_pipeline_manual_removed_electrodes_supersede_auto_detection(
     assert captured["low_variance_channels"] == []
 
 
+@pytest.mark.parametrize("source_evidence", ["ordinary", "matched", "headless", "missing", "changed"])
 def test_run_full_pipeline_publishes_available_source_conditions(
     monkeypatch,
     tmp_path: Path,
+    source_evidence: str,
 ) -> None:
     info = mne.create_info(["Cz", "Pz", "Status"], sfreq=8.0, ch_types=["eeg", "eeg", "stim"])
     raw = _with_biosemi64_montage(
@@ -1419,11 +1423,41 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     )
     monkeypatch.setattr(mne, "find_events", lambda *_args, **_kwargs: events)
 
-    fake_bdf = tmp_path / "fake.bdf"
-    fake_bdf.write_bytes(b"fake bdf")
+    approval_settings = {}
+    if source_evidence == "ordinary":
+        source = tmp_path / "fake.bdf"
+        source.write_bytes(b"fake bdf")
+        expected_geometry = biosemi64_geometry_identity(retained_channels=("Cz", "Pz"))
+    else:
+        from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
+        from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+        from tests.test_brain_products_reader import _write_bvcdf
+
+        source, _ = _write_bvcdf(tmp_path)
+        approval = source_hashes_by_file(recording_content_identity(source))
+        expected_geometry = attach_raw_recorded_geometry(raw, template_montage="standard_1020")
+        approval_settings.update(hardware_platform="brain_products", hardware_confirmed=True,
+                                 electrode_montage="standard_1020", raw_signal_screening_enabled=False,
+                                 kurtosis_screening_enabled=False)
+        reviewed = {studio_source_path_key(source): approval}
+        if source_evidence == "headless":
+            monkeypatch.setattr(process_runner, "read_project_studio_source_approvals", lambda _root: reviewed)
+            load_cache = process_runner._load_preprocessed_cache
+
+            def check_cache_scope(**kwargs):
+                assert kwargs["settings"][STUDIO_SOURCE_APPROVALS_KEY] == reviewed
+                return load_cache(**kwargs)
+
+            monkeypatch.setattr(process_runner, "_load_preprocessed_cache", check_cache_scope)
+        else:
+            approval_settings[STUDIO_SOURCE_APPROVALS_KEY] = reviewed
+        if source_evidence != "missing":
+            raw._studio_source_sha256_by_file = dict(approval)
+            if source_evidence == "changed":
+                raw._studio_source_sha256_by_file[str(tmp_path / "signal.eeg")] = "0" * 64
 
     result = process_runner._run_full_pipeline_for_file(
-        file_path=fake_bdf,
+        file_path=source,
         settings={
             "stim_channel": "Status",
             "ref_channel1": "EXG1",
@@ -1431,8 +1465,9 @@ def test_run_full_pipeline_publishes_available_source_conditions(
             "enable_preprocessed_cache": False,
             "_fpvs_processing_fingerprint": "fixture-fingerprint",
             "_fpvs_processing_fingerprint_version": "fixture-version",
+            **approval_settings,
             **_protocol_settings(
-                file_path=fake_bdf,
+                file_path=source,
                 events=events,
                 event_map={"A": 21, "B": 22},
                 sfreq=8,
@@ -1448,7 +1483,16 @@ def test_run_full_pipeline_publishes_available_source_conditions(
         project_root=tmp_path / "project",
     )
 
+    if source_evidence in {"missing", "changed"}:
+        assert result["status"] == "error" and result["stage"] == "load"
+        assert "source admission evidence" in result["error"]
+        assert not captured and "source_sha256_by_file" not in result
+        return
     assert result["status"] == "ok"
+    if source_evidence != "ordinary":
+        assert result["source_sha256_by_file"] == approval
+    else:
+        assert "source_sha256_by_file" not in result
     assert "epochs_dict" in captured
     assert captured["epochs_dict"]["B"] == []
     epochs = captured["epochs_dict"]["A"][0]
@@ -1492,9 +1536,7 @@ def test_run_full_pipeline_publishes_available_source_conditions(
     assert provenance["preprocessed_raw_cache_version"] == (
         process_runner.PREPROC_CACHE_VERSION
     )
-    assert provenance["geometry"] == biosemi64_geometry_identity(
-        retained_channels=("Cz", "Pz")
-    )
+    assert provenance["geometry"] == expected_geometry
     assert provenance["analysis_span_plan_version"] == ANALYSIS_SPAN_PLAN_VERSION
     assert provenance["source_analysis_span_plan"]["fingerprint"]
     assert provenance["realized_analysis_span_plan"]["fingerprint"]

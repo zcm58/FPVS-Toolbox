@@ -50,9 +50,9 @@ existing scalar path.
 Processing completion must recognize published `.fpvs` results as well as
 historical Excel outputs. The GUI and post-export worker share the same
 format-aware output snapshot, retaining the existing modification-time/size
-change checks for current-run writes. Companion archives, temporary files and
-metadata sidecars alone do not establish a completed result. Completion and
-missing-output messages refer to result files rather than assuming Excel;
+change checks for current-run writes. The snapshot excludes companion archives,
+metadata sidecars and Toolbox's hidden `.<stem>.<token>.tmp.xlsx` staging files.
+Completion and missing-output messages refer to result files rather than assuming Excel;
 scientific readiness and export-receipt validation remain separate checks.
 Once the run has recorded a successful export, finalization uses that outcome
 and skips the last directory scan. If success is still undecided, finalization
@@ -324,6 +324,12 @@ Artifact pairs use
 sibling `_avg_raw.json`; participant commit manifests use
 `manifests/[<group>/]<participant>.json` and are published last.
 
+Writers serialize publication per participant or recording manifest. A focused
+repair requires a complete merge base that covers the available conditions
+outside the repair. For a focused repair, the writer stages
+the new FIF, sidecar and manifest, and restores the preceding files after a
+publication error. A missing or incomplete inventory requires full regeneration.
+
 The source-ready writer requires the processing-owned canonical geometry
 payload, verifies that the averaged Raw contains exactly its retained scalp
 set, and writes that payload into every JSON sidecar and participant commit
@@ -444,7 +450,9 @@ whole-scalp set makes every normalized ROI derivative for that recording-
 condition blank. Duplicate/missing source rows and nonfinite computable values
 are technical failures rather than partial sums. The writer publishes through
 a same-directory temporary workbook and atomic replacement so a failed rebuild
-cannot replace a prior complete XLSX file.
+cannot replace a prior complete XLSX file. It stores project labels, headers
+and notes as literal text, including values beginning with an equals sign.
+Calculated scientific results retain their numeric Excel types.
 
 ## Project Protocol And Spectral Eligibility
 

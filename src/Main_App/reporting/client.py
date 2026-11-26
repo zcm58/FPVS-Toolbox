@@ -11,6 +11,7 @@ from uuid import UUID
 
 from Main_App.projects.manifest_store import project_manifest_transaction
 from Main_App.reporting.credentials import CredentialStore
+from Main_App.reporting.provenance import reporting_scope
 from Main_App.reporting.snapshots import (
     MAX_ATTEMPTS,
     MAX_REQUEST_BYTES,
@@ -119,17 +120,19 @@ def enroll(project_root: Path, scope: dict[str, str], code: str, *, store=None, 
     return response
 
 
-def deliver_pending(project_root: Path, *, store=None, transport=request_json, retry=False) -> str:
+def deliver_pending(
+    project_root: Path, *, expected_scope: dict[str, str] | None = None,
+    store=None, transport=request_json, retry=False,
+) -> str:
     state = read_state(project_root)
     if not state["pending"]:
         return "no_pending"
     scope = state.get("scope")
     if not scope:
         return "connection_required"
-    credentials = store if store is not None else CredentialStore(project_root, scope)
-    token = credentials.load()
-    if not token:
-        return "connection_required"
+    from Main_App.projects.project import Project
+
+    token = None
     # Sequential parents and a two-request bound preserve responsiveness/offline results.
     for item in state["pending"][:2]:
         if item["attempts"] >= MAX_ATTEMPTS and not retry:
@@ -137,8 +140,18 @@ def deliver_pending(project_root: Path, *, store=None, transport=request_json, r
         identifier = item["snapshot_id"]
         payload = load_snapshot(project_root, identifier)
         manifest = payload["manifest"]
-        if any(manifest.get(key) != scope[key] for key in scope):
+        current_scope = reporting_scope(Project.load(project_root))
+        outbox = read_state(project_root)
+        if (current_scope != scope or outbox.get("scope") != scope
+                or expected_scope is not None and current_scope != expected_scope
+                or manifest.get("dataset_id") != outbox["dataset_id"]
+                or any(manifest.get(key) != value for key, value in current_scope.items())):
             raise ReportingError("snapshot_scope_conflict")
+        if token is None:
+            credentials = store if store is not None else CredentialStore(project_root, current_scope)
+            token = credentials.load()
+            if not token:
+                return "connection_required"
         try:
             response = transport("/analysis/v1/snapshots", payload, token)
             if (

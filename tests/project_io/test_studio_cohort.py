@@ -1,5 +1,7 @@
 from copy import deepcopy
+import hashlib
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -44,6 +46,14 @@ def _set_brainvision_cap(source, visit_index, montage):
     visit.update(setup_id=key, recording={"selected_backend": "brainproducts_triggerbox", "electrode_montage": montage})
 
 
+def _write_brainvision_recording(header):
+    data = header.with_suffix(".eeg")
+    marker = header.with_suffix(".vmrk")
+    header.write_text(f"[Common Infos]\nDataFile={data.name}\nMarkerFile={marker.name}\n")
+    marker.write_text(f"[Common Infos]\nDataFile={data.name}\n")
+    data.write_bytes(bytes(40))
+
+
 def test_study_cap_uses_selected_visits_and_keeps_later_project_edits(tmp_path):
     source = make_source()
     cap64, cap128 = "brainproducts_acticap_gacs_64", "brainproducts_acticap_gacs_128"
@@ -55,7 +65,7 @@ def test_study_cap_uses_selected_visits_and_keeps_later_project_edits(tmp_path):
     raw = tmp_path / "raw"
     raw.mkdir()
     for visit in source["visits"]:
-        (raw / f"P{visit['participant_number']}.vhdr").touch()
+        _write_brainvision_recording(raw / f"P{visit['participant_number']}.vhdr")
     review = review_study(data, raw, hardware="brain_products")
     decisions = {r.visit["visit_id"]: ("matched", r.candidates[0]) for r in review.rows}
     options = dict(decisions=decisions, omissions={},
@@ -74,6 +84,56 @@ def test_study_cap_uses_selected_visits_and_keeps_later_project_edits(tmp_path):
     assert project.preprocessing["electrode_montage"] == cap64
 
 
+def test_review_compares_complete_brainvision_sources_and_legacy_matches(tmp_path, monkeypatch):
+    from Main_App.projects import studio_cohort
+    source = make_source()
+    source["visits"] = source["visits"][:1]
+    _set_brainvision_cap(source, 0, "brainproducts_acticap_gacs_64")
+    imported = write_source(tmp_path, source)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    header = raw / "P001.vhdr"
+    _write_brainvision_recording(header)
+    _write_brainvision_recording(raw / "extra.vhdr")
+    (raw / "P002.vhdr").touch()  # Incomplete extra recording can be deferred.
+    content_reads = []
+    original_identity = studio_cohort.recording_content_identity
+    def checked_identity(path):
+        content_reads.append(path.name)
+        return original_identity(path)
+    monkeypatch.setattr(studio_cohort, "recording_content_identity", checked_identity)
+    review = review_study(imported, raw)
+    assert set(review.unreadable) == {"P002.vhdr"}
+    assert "extra.vhdr" in content_reads
+    options = dict(decisions={"exec-1": ("matched", header.name)}, omissions={},
+                   versions=[source["visits"][0]["protocol_version_id"]])
+    root = tmp_path / "projects"
+    content_reads.clear()
+    project = commit_study_review(root, imported, review, **options)
+    assert content_reads == [header.name]
+    reviewed = review_study(imported, raw, project)
+    assert reviewed.rows[0].status == "matched"
+    original = (project.project_root / "project.json").read_bytes()
+    signal = header.with_suffix(".eeg")
+    original_stat = signal.stat()
+    actual_stat = Path.stat
+    # Model the same size, modification time and Windows creation time on every CI host.
+    monkeypatch.setattr(Path, "stat", lambda self, *a, **kw: original_stat if self == signal else actual_stat(self, *a, **kw))
+    signal.write_bytes(b"\x01" * original_stat.st_size)
+    changed = review_study(imported, raw, project)
+    assert changed.files[header.name]["recording_sources"] == reviewed.files[header.name]["recording_sources"]
+    assert changed.files[header.name]["source_sha256_by_file"] != reviewed.files[header.name]["source_sha256_by_file"]
+    assert changed.rows[0].status == "reconfirm_recording"
+    with pytest.raises(ValueError, match="changed after review"):
+        commit_study_review(root, imported, reviewed, existing=project, **options)
+    assert (project.project_root / "project.json").read_bytes() == original
+    signal.write_bytes(bytes(original_stat.st_size))
+    legacy = json.loads(original)
+    del legacy["tools"]["studio_cohort"]["visits"]["exec-1"]["source_sha256_by_file"]
+    (project.project_root / "project.json").write_text(json.dumps(legacy))
+    assert review_study(imported, raw, project).rows[0].status == "reconfirm_recording"
+
+
 def test_mixed_recorders_still_require_manual_cohort_review(tmp_path):
     source = make_source()
     for index in range(3):
@@ -85,6 +145,38 @@ def test_mixed_recorders_still_require_manual_cohort_review(tmp_path):
     assert "differs from project hardware" in review.rows[1].problem
     with pytest.raises(ValueError, match="Select the project recording system"):
         commit_study_review(tmp_path / "projects", data, review, decisions={}, omissions={}, versions=[])
+
+
+def test_retained_brainvision_visit_with_changed_bytes_can_be_archived(tmp_path):
+    source = make_source()
+    source["visits"] = source["visits"][:2]
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    root = tmp_path / "projects"
+    for index, visit in enumerate(source["visits"]):
+        _set_brainvision_cap(source, index, "brainproducts_acticap_gacs_64")
+        _write_brainvision_recording(raw / f"P{visit['participant_number']}.vhdr")
+    imported = write_source(tmp_path, source)
+    versions = [source["visits"][0]["protocol_version_id"]]
+    decisions = {"exec-1": ("matched", "P001.vhdr"), "exec-2": ("matched", "P002.vhdr")}
+    project = commit_study_review(root, imported, review_study(imported, raw), decisions=decisions,
+                                  versions=versions, omissions={})
+    source["visits"].pop(0)
+    source["roster_sequence"] += 1
+    del decisions["exec-1"]
+    revised = write_source(tmp_path, source)
+    project = commit_study_review(root, revised, review_study(revised, raw, project), existing=project,
+                                  decisions=decisions, versions=versions, omissions={"exec-1": "retain"})
+    assert review_study(revised, raw, project).omitted == {}
+    (raw / "P001.eeg").write_bytes(b"updated signal")
+    review = review_study(revised, raw, project)
+    assert set(review.omitted) == {"exec-1"}
+    with pytest.raises(ValueError, match="omitted visit exec-1 differs"):
+        commit_study_review(root, revised, review, existing=project, decisions=decisions,
+                            versions=versions, omissions={"exec-1": "retain"})
+    saved = commit_study_review(root, revised, review, existing=project, decisions=decisions,
+                                versions=versions, omissions={"exec-1": "archive"})
+    assert saved.manifest["tools"]["studio_cohort"]["visits"]["exec-1"]["decision"] == "archived"
 
 
 def test_cohort_review_and_revised_import_keep_history_and_filter_processing(tmp_path):
@@ -108,6 +200,14 @@ def test_cohort_review_and_revised_import_keep_history_and_filter_processing(tmp
     pipeline = prepare_batch_files(project)
     assert set(pipeline) == {raw / "P001.bdf", raw / "P002_raw.bdf"}
     assert find_study_project(root, source["study_id"]).project_root == project.project_root
+    damaged = root / "Unrelated project" / "project.json"
+    damaged.parent.mkdir()
+    for malformed in ("[", "[]", '{"tools": []}'):
+        damaged.write_text(malformed)
+        warnings = []
+        assert find_study_project(root, source["study_id"], warnings=warnings).project_root == project.project_root
+        assert str(damaged) in warnings[0]
+        assert find_study_project(root, str(uuid4())) is None
     with pytest.raises(ValueError):
         raw_file_info_for_path(project, raw / "extra.bdf")
     project.save()
@@ -200,7 +300,10 @@ def test_twenty_then_twenty_one_preserves_prior_workbook_and_requires_a_new_rele
     artifact = artifact_freshness.ANALYSIS_READY_FULL_AUDIT_ARTIFACT
     book = artifact_freshness.canonical_artifact_path(root, artifact)
     book.parent.mkdir(exist_ok=True, parents=True)
-    book.write_bytes(b"synthetic released result for first 20")
+    from openpyxl import Workbook
+    initial = Workbook()
+    initial.active.append(["Synthetic released result for first 20"])
+    initial.save(book)
     def ready():
         with project_manifest_transaction(root / "project.json") as tx:
             manifest = json.loads((root / "project.json").read_bytes())
@@ -234,6 +337,11 @@ def test_twenty_then_twenty_one_preserves_prior_workbook_and_requires_a_new_rele
     prior = state["history"][-1]
     assert len(project.recordings) == 21 and "current_result" not in state
     assert (root / prior["previous_result"]).read_bytes() == book.read_bytes()
+    from Main_App.projects.studio_archive import verified_archived_workbook
+    assert verified_archived_workbook(root, prior) == root / prior["previous_result"]
+    legacy = dict(prior)
+    del legacy["previous_result_sha256"]
+    assert verified_archived_workbook(root, legacy) == root / prior["previous_result"]
     assert len(prior["current_result"]["included"]) == 20
     ready()
     release(project)
@@ -300,3 +408,79 @@ def test_revised_study_preserves_canonical_groups_sources_and_recording_metadata
     assert (kept["source_id"], kept["days_from_baseline"]) == ("baseline_patients", 3)
     project.save()
     assert Project.load(project.project_root).groups_locked
+
+
+def test_new_study_only_accepts_the_reviewed_unreadable_siblings(tmp_path):
+    source = make_source()
+    imported = write_source(tmp_path, source)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "P001.bdf").write_bytes(b"synthetic")
+    review = review_study(imported, raw)
+    options = dict(decisions={"exec-1": ("matched", "P001.bdf"), "exec-2": ("awaiting_eeg", None),
+                              "exec-3": ("awaiting_eeg", None)}, hardware="biosemi", omissions={},
+                   versions=[source["visits"][0]["protocol_version_id"]])
+    projects = tmp_path / "projects"
+    first = projects / "Incomplete" / "project.json"
+    first.parent.mkdir(parents=True)
+    first.write_text("[")
+    accepted = []
+    assert find_study_project(projects, source["study_id"], warnings=accepted) is None
+    assert len(accepted) == 1 and str(first) in accepted[0]
+    with pytest.raises(ValueError, match="Reopen the Studio import"):
+        commit_study_review(projects, imported, review, **options)
+    second = projects / "Unreadable" / "project.json"
+    second.parent.mkdir()
+    second.write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="Unreadable"):
+        commit_study_review(projects, imported, review, accepted_unreadable=accepted, **options)
+    accepted = []
+    assert find_study_project(projects, source["study_id"], warnings=accepted) is None
+    assert len(accepted) == 2
+    project = commit_study_review(projects, imported, review, accepted_unreadable=accepted, **options)
+    assert find_study_project(projects, source["study_id"]).project_root == project.project_root
+    with pytest.raises(ValueError, match="already|was imported"):
+        commit_study_review(projects, imported, review, accepted_unreadable=accepted, **options)
+
+
+def test_archive_requires_a_regular_canonical_workbook_and_matching_digest(tmp_path):
+    from Main_App.projects.studio_archive import verified_archived_workbook
+
+    archives = tmp_path / ".fpvs_imports/studio/prior-results"
+    archives.mkdir(parents=True)
+    document = archives / ("a" * 64 + ".xlsx")
+    document.write_bytes(b"not a workbook")
+    receipt = {"previous_result": document.relative_to(tmp_path).as_posix(),
+               "previous_result_sha256": hashlib.sha256(document.read_bytes()).hexdigest()}
+    with pytest.raises(ValueError, match="readable XLSX"):
+        verified_archived_workbook(tmp_path, receipt)
+    with pytest.raises(ValueError, match="differs from its recorded checksum"):
+        verified_archived_workbook(tmp_path, {**receipt, "previous_result_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="invalid workbook path"):
+        verified_archived_workbook(tmp_path, {**receipt, "previous_result": ".fpvs_imports/studio/prior-results/note.txt"})
+    with pytest.raises(ValueError, match="no verifiable release checksum"):
+        verified_archived_workbook(tmp_path, {"previous_result": receipt["previous_result"]})
+
+
+@pytest.mark.parametrize("parent", [".fpvs_imports", ".fpvs_imports/studio", ".fpvs_imports/studio/prior-results"])
+def test_studio_managed_files_reject_linked_parents(tmp_path, parent):
+    from Main_App.projects.studio_archive import archive_reviewed_result, studio_evidence_path
+
+    root = tmp_path / "project"
+    linked = root / parent
+    linked.parent.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    try:
+        linked.symlink_to(elsewhere, target_is_directory=True)
+    except OSError as exc:
+        if os.name != "nt" or exc.winerror != 1314:
+            raise
+        import _winapi
+        _winapi.CreateJunction(str(elsewhere), str(linked))
+    if linked.name != "prior-results":
+        with pytest.raises(ValueError, match="must stay inside"):
+            studio_evidence_path(root, "b" * 64)
+    with pytest.raises(ValueError, match="must stay inside"):
+        archive_reviewed_result(root, root / "not-needed.xlsx", "a" * 64, None)
+    assert not list(elsewhere.iterdir())

@@ -136,6 +136,48 @@ def test_current_filter_change_invalidates_existing_cache_key(tmp_path):
     assert loaded is None and status == "miss"
 
 
+@pytest.mark.parametrize("reader", ["bvcdf", "bvrf"])
+def test_reviewed_source_cache_requires_current_approval_and_admission_evidence(tmp_path, monkeypatch, reader):
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_path_key
+    from tests.test_brain_products_reader import _write_bvcdf, _write_bvrf
+
+    raw, kwargs, *_ = _cache_case(tmp_path)
+    source, _ = (_write_bvcdf if reader == "bvcdf" else _write_bvrf)(tmp_path)
+    kwargs["file_path"] = source
+    base_settings = dict(kwargs["settings"])
+    hashes = source_hashes_by_file(recording_content_identity(source))
+    key = studio_source_path_key(source)
+    unrelated = studio_source_path_key(tmp_path / "unused.vhdr")
+    approvals = {key: hashes, unrelated: {}}
+    settings = {**base_settings, STUDIO_SOURCE_APPROVALS_KEY: approvals}
+    kwargs["settings"] = settings
+    assert process_runner._recording_job_settings(source, settings)[STUDIO_SOURCE_APPROVALS_KEY] == {key: hashes}
+    ordinary = process_runner._preproc_cache_payload(source, base_settings, mne_version=mne.__version__)
+    other_approval = {**base_settings, STUDIO_SOURCE_APPROVALS_KEY: {unrelated: {}}}
+    assert ordinary == process_runner._preproc_cache_payload(source, other_approval, mne_version=mne.__version__)
+    stored = {"source_sha256_by_file": hashes}
+    payload = process_runner._preproc_cache_payload(source, settings, mne_version=mne.__version__)
+    assert payload == {**ordinary, **stored}
+    assert process_runner._store_preprocessed_cache(raw=raw, audit_before={}, n_rejected=0, **kwargs) != "stored"
+    assert process_runner._store_preprocessed_cache(raw=raw, audit_before=stored, n_rejected=0, **kwargs) == "stored"
+    loaded, audit, _, status = process_runner._load_preprocessed_cache(**kwargs)
+    assert status == "hit" and audit == stored
+    with loaded:
+        assert loaded.get_data().tobytes() == raw.get_data().tobytes()
+
+    monkeypatch.setattr(mne.io, "read_raw_fif", lambda *_args, **_kwargs: pytest.fail("opened an unverified cache"))
+    changed = {**hashes, str(source): "0" * 64}
+    changed_settings = {**settings, STUDIO_SOURCE_APPROVALS_KEY: {key: changed}}
+    assert process_runner._load_preprocessed_cache(**{**kwargs, "settings": changed_settings})[-1] == "miss"
+    _, meta_path = process_runner._preproc_cache_paths(kwargs["project_root"], source, process_runner._preproc_cache_key(payload))
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    for evidence in [{}, {"source_sha256_by_file": changed}]:
+        meta["audit_before"] = evidence
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        assert process_runner._load_preprocessed_cache(**kwargs)[-1] == "miss_studio_source_evidence"
+
+
 def test_disabling_preprocessed_cache_preserves_entries_for_reuse(tmp_path):
     raw, kwargs, _key, fif_path, meta_path = _cache_case(tmp_path)
     original = fif_path.read_bytes(), meta_path.read_bytes()

@@ -238,8 +238,10 @@ def _reject_json_constant(value: str) -> None:
 
 
 def _write_import_provenance(project: Project, imported: FPVSConfigImport) -> None:
-    relative_path = Path(".fpvs_imports") / "studio" / f"{imported.source_sha256}.json"
-    target = project.project_root / relative_path
+    from Main_App.projects.studio_archive import studio_evidence_path
+
+    target = studio_evidence_path(project.project_root, imported.source_sha256)
+    relative_path = target.relative_to(project.project_root)
     target.parent.mkdir(parents=True, exist_ok=True)
     provenance = {
         "source_filename": imported.source_filename,

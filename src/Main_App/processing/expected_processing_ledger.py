@@ -1859,6 +1859,14 @@ def build_expected_recording_condition_plan(
     )
     exclusions = _normalized_planning_exclusions(planning_settings)
     run_paths = {Path(path).resolve(strict=False) for path in processing_plan.run_files}
+    if len(run_paths) < len(processing_plan.states):
+        from Main_App.processing.incremental_recording_plan import require_retained_studio_sources
+        from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY
+
+        require_retained_studio_sources(processing_plan, prior_ledger, processing_plan.studio_source_approvals, run_paths)
+        current = (planning_settings or {}).get(STUDIO_SOURCE_APPROVALS_KEY)
+        if current is not None and current != processing_plan.studio_source_approvals:
+            require_retained_studio_sources(processing_plan, prior_ledger, current, run_paths)
     seen_processing_ids: set[str] = set()
     seen_raw_paths: set[Path] = set()
     recording_plans: list[ExpectedRecordingPlan] = []

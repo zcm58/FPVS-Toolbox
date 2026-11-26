@@ -130,32 +130,21 @@ def check_update_candidate(
     """Independent helper discovery without scanning application payload files."""
     releases = fetch_release_metadata(DEFAULT_RELEASES_API_URL, cancel_event=cancel_event)
     current = _parse_version(current_version)
-    result = select_update_from_releases(releases, current_version=current_version)
+    latest_release = _latest_candidate_release(releases, include_prereleases=current.is_prerelease)
     if repair:
-        latest = select_update_from_releases(
-            releases, current_version="0.0.0", include_prereleases=current.is_prerelease
-        )
+        latest = _release_result(latest_release, "0.0.0", Version("0.0.0"))
         if _parse_version(latest.latest_version) < current:
             raise UpdateError("No current or newer published installer is available for repair.")
-        result = replace(
+        return replace(
             latest,
             current_version=current_version,
             selection_reason="Full installer selected for repair or reinstallation.",
         )
-    if not result.update_available or repair or force_full:
+    result = _release_result(latest_release, current_version, current)
+    if not result.update_available or force_full or latest_release is None:
         return result
     if phase_callback is not None:
         phase_callback(UpdatePhase("Update found. Checking available packages...", result))
-    latest_release = next(
-        (
-            candidate
-            for candidate in _iter_candidate_releases(releases, include_prereleases=current.is_prerelease)
-            if str(candidate.version) == result.latest_version
-        ),
-        None,
-    )
-    if latest_release is None:
-        return result
     return select_patch_candidate(
         result,
         latest_release.assets,
@@ -178,13 +167,17 @@ def select_update_from_releases(
 
     current = _parse_version(current_version)
     include_beta = current.is_prerelease if include_prereleases is None else include_prereleases
-    candidates = sorted(
-        _iter_candidate_releases(releases, include_prereleases=include_beta),
-        key=lambda release: release.version,
-        reverse=True,
-    )
+    latest = _latest_candidate_release(releases, include_prereleases=include_beta)
+    result = _release_result(latest, current_version, current)
+    if resolve_patches and result.update_available and latest is not None:
+        if phase_callback is not None:
+            phase_callback(UpdatePhase("Update found. Checking patch availability...", result))
+        return select_patch_update(result, latest.assets, cancel_event=cancel_event, phase_callback=phase_callback)
+    return result
 
-    if not candidates:
+
+def _release_result(latest: CandidateRelease | None, current_version: str, current: Version) -> UpdateCheckResult:
+    if latest is None:
         return UpdateCheckResult(
             current_version=current_version,
             latest_version=current_version,
@@ -195,8 +188,7 @@ def select_update_from_releases(
             is_prerelease=current.is_prerelease,
         )
 
-    latest = candidates[0]
-    result = UpdateCheckResult(
+    return UpdateCheckResult(
         current_version=current_version,
         latest_version=str(latest.version),
         update_available=latest.version > current,
@@ -206,11 +198,6 @@ def select_update_from_releases(
         is_prerelease=latest.is_prerelease,
         metadata_incomplete=latest.version > current and latest.installer_asset is None,
     )
-    if resolve_patches and result.update_available:
-        if phase_callback is not None:
-            phase_callback(UpdatePhase("Update found. Checking patch availability...", result))
-        return select_patch_update(result, latest.assets, cancel_event=cancel_event, phase_callback=phase_callback)
-    return result
 
 
 def summarize_release_notes(body: str) -> str:
@@ -223,11 +210,12 @@ def summarize_release_notes(body: str) -> str:
     return f"{summary[: _SUMMARY_LIMIT - 3].rstrip()}..."
 
 
-def _iter_candidate_releases(
+def _latest_candidate_release(
     releases: Iterable[dict[str, Any]],
     *,
     include_prereleases: bool,
-) -> Iterable[CandidateRelease]:
+) -> CandidateRelease | None:
+    latest: tuple[Version, str, bool, dict[str, Any]] | None = None
     for release in releases:
         if release.get("draft") is True:
             continue
@@ -241,24 +229,23 @@ def _iter_candidate_releases(
         is_prerelease = release.get("prerelease") is True or version.is_prerelease
         if is_prerelease and not include_prereleases:
             continue
-        asset = _select_installer_asset(
-            release.get("assets"),
-            normalized_version=str(version),
-            tag_name=tag_name,
-        )
-        release_url = release.get("html_url")
-        body = release.get("body", "")
-        yield CandidateRelease(
-            version=version,
-            tag_name=tag_name,
-            release_url=release_url if isinstance(release_url, str) else None,
-            body=body if isinstance(body, str) else "",
-            installer_asset=asset,
-            is_prerelease=is_prerelease,
-            assets=tuple(item for item in release.get("assets", []) if isinstance(item, dict))
-            if isinstance(release.get("assets"), list)
-            else (),
-        )
+        if latest is None or version > latest[0]:
+            latest = (version, tag_name, is_prerelease, release)
+    if latest is None:
+        return None
+    version, tag_name, is_prerelease, release = latest
+    release_url = release.get("html_url")
+    body = release.get("body", "")
+    assets = release.get("assets")
+    return CandidateRelease(
+        version=version,
+        tag_name=tag_name,
+        release_url=release_url if isinstance(release_url, str) else None,
+        body=body if isinstance(body, str) else "",
+        installer_asset=_select_installer_asset(assets, normalized_version=str(version), tag_name=tag_name),
+        is_prerelease=is_prerelease,
+        assets=tuple(item for item in assets if isinstance(item, dict)) if isinstance(assets, list) else (),
+    )
 
 
 def _select_installer_asset(

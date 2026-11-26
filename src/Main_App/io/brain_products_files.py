@@ -6,8 +6,9 @@ identify the complete source for copying and provenance, never just the header.
 from __future__ import annotations
 
 import configparser
+import os
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 class BrainProductsFormatError(ValueError):
@@ -46,58 +47,74 @@ def read_brainvision_header(path: str | Path) -> configparser.ConfigParser:
     return parser
 
 
-def _existing_file(path: Path) -> Path:
-    if not path.is_file():
+def _existing_file(path: Path, root: Path) -> Path:
+    # Reject an unrelated absolute path (including a different Windows share)
+    # before attempting filesystem access, then check the actual link target.
+    if not Path(os.path.abspath(path)).is_relative_to(root):
+        raise BrainProductsFormatError("Brain Products files must remain inside the recording folder.")
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root):
+        raise BrainProductsFormatError("Brain Products files must remain inside the recording folder.")
+    if not resolved.is_file():
         raise FileNotFoundError(f"Required Brain Products recording file is missing: {path}")
-    return path.resolve(strict=True)
+    return resolved
 
 
-def _linked_file(header: Path, value: str) -> Path:
-    # BrainVision uses Windows path separators even when recordings move to Linux.
-    value = value.replace("\\", "/")
+def _linked_file(header: Path, value: str, root: Path, *, native_paths: bool = False) -> Path:
     if not value.strip():
         raise BrainProductsFormatError("A BrainVision companion filename is empty.")
-    return _existing_file(header.parent / value)
+    if PureWindowsPath(value).drive and not Path(value).is_absolute():
+        raise BrainProductsFormatError("BrainVision companions must identify a file inside the recording folder.")
+    declared = header.parent / value
+    relocated = header.parent / value.replace("\\", "/")
+    file = _existing_file(relocated, root)
+    # The native MNE reader opens the declared spelling literally on POSIX.
+    # Never validate one path and let it open a different file with that name.
+    if native_paths and declared != relocated and declared.resolve() != file:
+        raise BrainProductsFormatError("Use forward slashes for nested BrainVision paths on this platform.")
+    return file
 
 
-def _bvrf_companion(header: Path, suffix: str, *, required: bool = True) -> Path | None:
+def _bvrf_companion(header: Path, suffix: str, root: Path, *, required: bool = True) -> Path | None:
     """Resolve Windows-created upper-case extensions on case-sensitive hosts."""
     name = header.with_suffix(suffix).name.casefold()
     matches = [entry for entry in header.parent.iterdir() if entry.name.casefold() == name]
     if len(matches) > 1:
         raise BrainProductsFormatError(f"Ambiguous BVRF companion filenames differing only by case: {name}")
     if matches:
-        return _existing_file(matches[0])
+        return _existing_file(matches[0], root)
     if required:
         raise FileNotFoundError(f"Required Brain Products recording file is missing: {header.with_suffix(suffix)}")
     return None
 
 
-def source_files(path: str | Path) -> tuple[Path, ...]:
+def source_files(path: str | Path, *, native_paths: bool = False) -> tuple[Path, ...]:
     """Return existing header, data, markers, and optional impedance paths."""
-    header = _existing_file(Path(path))
+    selected = Path(path)
+    root = selected.parent.resolve(strict=True)
+    header = _existing_file(root / selected.name, root)
     extension = header.suffix.lower()
     if extension == ".vhdr":
         parser = read_brainvision_header(header)
         try:
             common = parser["Common Infos"]
-            data = _linked_file(header, common["DataFile"])
-            markers = _linked_file(header, common["MarkerFile"])
+            data = _linked_file(header, common["DataFile"], root, native_paths=native_paths)
+            markers = _linked_file(header, common["MarkerFile"], root, native_paths=native_paths)
         except KeyError as exc:
             raise BrainProductsFormatError("BrainVision headers must name DataFile and MarkerFile.") from exc
         if len({header, data, markers}) != 3:
             raise BrainProductsFormatError("BrainVision header, data and markers must be different files.")
         marker_header = read_brainvision_header(markers)
         try:
-            marker_data = _linked_file(markers, marker_header["Common Infos"]["DataFile"])
+            marker_data = _linked_file(markers, marker_header["Common Infos"]["DataFile"], root)
         except KeyError as exc:
             raise BrainProductsFormatError("BrainVision marker file must name its DataFile.") from exc
         if marker_data != data:
             raise BrainProductsFormatError("BrainVision header and marker file name different data files.")
         return header, data, markers
     if extension == ".bvrh":
-        files = [header, _bvrf_companion(header, ".bvrd"), _bvrf_companion(header, ".bvrm")]
-        impedance = _bvrf_companion(header, ".bvri", required=False)
+        files = [header, _bvrf_companion(header, ".bvrd", root), _bvrf_companion(header, ".bvrm", root)]
+        impedance = _bvrf_companion(header, ".bvri", root, required=False)
         if impedance is not None:
             files.append(impedance)
         return tuple(files)

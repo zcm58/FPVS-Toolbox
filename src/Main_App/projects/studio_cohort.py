@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from copy import deepcopy
 import hashlib
 import json
+import logging
 from pathlib import Path
 import re
 import tempfile
@@ -15,7 +16,9 @@ from typing import Any
 from uuid import UUID
 
 from Main_App.io.file_filters import is_eeg_recording_file
+from Main_App.io.recording_sources import companion_identity, recording_content_identity, source_hashes_by_file
 from Main_App.projects.raw_identity import infer_raw_participant_id
+from Main_App.projects.studio_archive import archive_reviewed_result, studio_evidence_path
 from Main_App.projects.studio_handoff import (
     STUDIO_RECORDER_PLATFORMS, StudioRecordingSelection, studio_recording_selection,
 )
@@ -23,6 +26,7 @@ from Main_App.projects.studio_handoff import (
 FORMAT = "fpvs-study-handoff"
 NAMESPACE = "studio_cohort"
 _SHA = re.compile("[0-9a-f]{64}")
+logger = logging.getLogger(__name__)
 
 
 def digest(value: object) -> str:
@@ -171,11 +175,52 @@ class ReviewRow:
 @dataclass(frozen=True)
 class StudyReview:
     rows: tuple[ReviewRow, ...]
-    files: dict[str, tuple[int, int]]
+    files: dict[str, dict]
     omitted: dict[str, dict]
     folder: Path
     baseline: str | None
     prior: dict
+    unreadable: dict[str, str] = field(default_factory=dict)
+
+
+def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None) -> tuple[dict[str, dict], dict[str, str]]:
+    files, unreadable = {}, {}
+    for path in sorted(folder.rglob("*")):
+        if not is_eeg_recording_file(path) or not path.is_file():
+            continue
+        if not path.resolve().is_relative_to(folder):
+            raise ValueError(f"Recording resolves outside the selected folder: {path.name}")
+        name = path.relative_to(folder).as_posix()
+        try:
+            if path.suffix.lower() in {".vhdr", ".bvrh"} and (hash_names is None or name in hash_names):
+                members = recording_content_identity(path)
+                components = {
+                    "recording_sources": [{k: v for k, v in row.items() if k != "sha256"} for row in members],
+                    "source_sha256_by_file": source_hashes_by_file(members),
+                }
+            else:
+                components = companion_identity(path)
+            if components:
+                header = components["recording_sources"][0]
+                identity = [header["size"], header["mtime_ns"]]
+            else:
+                stat = path.stat()
+                identity = [stat.st_size, stat.st_mtime_ns]
+        except (OSError, ValueError) as exc:
+            unreadable[name] = str(exc)
+            continue
+        files[name] = {"file_identity": identity, **components}
+    return files, unreadable
+
+
+def _same_reviewed_recording(visit: Mapping, files: Mapping) -> bool:
+    current = files.get(visit.get("raw_file"))
+    return current is not None and all(visit.get(k) == v for k, v in current.items())
+
+
+def _retained_recording_needs_review(visit: Mapping, files: Mapping) -> bool:
+    return (visit.get("decision") == "matched" and Path(visit["raw_file"]).suffix.lower() in {".vhdr", ".bvrh"}
+            and not _same_reviewed_recording(visit, files))
 
 
 def review_study(imported, folder: Path, existing=None, *, hardware: str | None = None) -> StudyReview:
@@ -198,14 +243,7 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
         if (source["roster_sequence"] < previous["roster_sequence"] or
                 source["roster_sequence"] == previous["roster_sequence"] and source["roster_revision"] != previous["roster_revision"]):
             raise ValueError("This handoff predates or conflicts with the accepted roster. Export the latest study.")
-    files = {}
-    for path in sorted(folder.rglob("*")):
-        if not is_eeg_recording_file(path) or not path.is_file():
-            continue
-        if not path.resolve().is_relative_to(folder):
-            raise ValueError(f"Recording resolves outside the selected folder: {path.name}")
-        stat = path.stat()
-        files[path.relative_to(folder).as_posix()] = (stat.st_size, stat.st_mtime_ns)
+    files, unreadable = _recording_inventory(folder)
     by_pid: dict[str, list[str]] = {}
     for name in files:
         by_pid.setdefault(_pid(infer_raw_participant_id(name)), []).append(name)
@@ -237,38 +275,61 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
                     reason = f"Studio montage {selection.label} conflicts with the current project recording settings."
             except ValueError as exc:
                 reason = str(exc)
-        reviewed = prior.get("raw_file")
-        stable_match = reviewed in files and tuple(prior.get("file_identity", ())) == files[reviewed] if reviewed else False
+        stable_match = _same_reviewed_recording(prior, files)
         if change == "unchanged" and ((stable_match and not reason) or prior.get("decision") in {"awaiting_eeg", "excluded"}):
             status = prior["decision"]
         elif reason:
             status = "exception"
+        elif prior.get("decision") == "matched" and not stable_match:
+            status = "reconfirm_recording"
         elif len(candidates) == 1 and counts[pid] == 1:
             status = "clear"
         else:
             status = "ambiguous" if candidates else "missing"
         rows.append(ReviewRow(visit, prior, candidates, status, change, reason))
     ids = {row.visit["visit_id"] for row in rows}
-    omitted = {key: row for key, row in prior_visits.items() if key not in ids and row.get("in_source_roster", True)}
-    return StudyReview(tuple(rows), files, omitted, folder, baseline, previous)
+    omitted = {key: row for key, row in prior_visits.items() if key not in ids and (
+        row.get("in_source_roster", True) or _retained_recording_needs_review(row, files))}
+    return StudyReview(tuple(rows), files, omitted, folder, baseline, previous, unreadable)
 
 
 def _hardware(visit):
     return STUDIO_RECORDER_PLATFORMS.get((visit.get("recording") or {}).get("selected_backend"))
 
 
-def find_study_project(projects_root: Path, study_id: str):
+def find_study_project(projects_root: Path, study_id: str, *, warnings: list[str] | None = None):
     from Main_App.projects.project import Project
 
     matches = []
-    for path in Path(projects_root).glob("*/project.json"):
-        if path.parent.name.startswith("."):
+    failures = []
+    root = Path(projects_root)
+    if not root.exists():
+        return None
+    for sibling in root.iterdir():
+        if sibling.name.startswith("."):
             continue
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        if payload.get("tools", {}).get(NAMESPACE, {}).get("study_id") == study_id:
+        path = sibling / "project.json"
+        try:
+            if not sibling.is_dir():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
+            tools = payload.get("tools", {}) if isinstance(payload, dict) else None
+            cohort = tools.get(NAMESPACE, {}) if isinstance(tools, dict) else None
+            if not isinstance(cohort, dict):
+                raise ValueError("Invalid project or Studio cohort metadata.")
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as exc:
+            message = f"Could not check Studio study identity in {path}: {exc}"
+            logger.warning("%s", message)
+            failures.append(message)
+            continue
+        if cohort.get("study_id") == study_id:
             matches.append(path.parent)
     if len(matches) > 1:
         raise ValueError("Several Toolbox projects reference this study. Open the intended project before importing.")
+    if warnings is not None:
+        warnings.extend(failures)
     return Project.load(matches[0]) if matches else None
 
 
@@ -301,11 +362,10 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
             if row.problem or not name or name not in review.files or name in used:
                 raise ValueError(f"Visit {key} requires a distinct reviewed recording and compatible evidence.")
             path = (review.folder / name).resolve(strict=True)
-            stat = path.stat()
-            if not path.is_relative_to(review.folder) or review.files[name] != (stat.st_size, stat.st_mtime_ns):
+            if not path.is_relative_to(review.folder):
                 raise ValueError("An EEG file changed after review. Review the roster again.")
             used.add(name)
-            entry.update(raw_file=name, file_identity=list(review.files[name]),
+            entry.update(raw_file=name, **review.files[name],
                          recording_id="studio_" + hashlib.sha256(key.encode()).hexdigest()[:20])
             setup = source["setups"][visit["setup_id"]]
             method = _visit_method(source, visit)
@@ -343,6 +403,9 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
         prior["in_source_roster"] = False
         if decision == "archive":
             prior["decision"] = "archived"
+        elif _retained_recording_needs_review(prior, review.files):
+            raise ValueError(f"The recording for omitted visit {key} differs from its approval. "
+                             "Archive the previous membership or import a roster that includes the visit for review.")
         matches[key] = prior
     if any(v["decision"] == "matched" and version_key(v) in versions and v.get("method_sha256") != digest(signature)
            for v in matches.values()):
@@ -371,7 +434,7 @@ def selected_recording_ids(manifest: Mapping[str, Any] | None) -> set[str] | Non
 
 
 def commit_study_review(projects_root, imported, review, *, decisions, omissions, versions,
-                        warnings=(), hardware=None, existing=None, group_assignments=None):
+                        warnings=(), hardware=None, existing=None, group_assignments=None, accepted_unreadable=()):
     """Publish exactly the reviewed change, preserving source files and older receipts."""
     from Main_App.io.atomic_write import rename_with_retry
     from Main_App.projects.fpvs_config_import import _create_imported_project, _unique_project_root
@@ -384,7 +447,14 @@ def commit_study_review(projects_root, imported, review, *, decisions, omissions
             hardware = imported.study_recording_platform
         else:
             raise ValueError("Select the project recording system for this study.")
-    if review_study(imported, review.folder, existing, hardware=hardware).files != review.files:
+    hash_names = {name for decision, name in decisions.values() if decision == "matched"}
+    present = {row.visit["visit_id"] for row in review.rows}
+    hash_names.update(visit["raw_file"] for key, visit in review.prior.get("visits", {}).items()
+                      if key not in present and visit["decision"] == "matched" and omissions.get(key) != "archive")
+    files, _ = _recording_inventory(review.folder, hash_names=hash_names)
+    if files.keys() != review.files.keys() or any(
+        any(review.files[name].get(k) != v for k, v in current.items()) for name, current in files.items()
+    ):
         raise ValueError("The EEG folder changed after review. Reopen the roster to check its matches.")
     state, setup, selection = _reviewed_state(imported, review, decisions, omissions, versions, warnings, hardware)
     if existing:
@@ -398,8 +468,13 @@ def commit_study_review(projects_root, imported, review, *, decisions, omissions
         _publish(work, imported, review, state, setup, hardware, {}, selection)
         from Main_App.projects.manifest_store import project_manifest_transaction
         with project_manifest_transaction(root / f".studio-import-{state['study_id']}"):
-            if find_study_project(root, state["study_id"]) is not None:
+            unreadable = []
+            if find_study_project(root, state["study_id"], warnings=unreadable) is not None:
                 raise ValueError("This study was imported during review. Reopen it to update the existing project.")
+            unreviewed = sorted(set(unreadable).difference(accepted_unreadable))
+            if unreviewed:
+                raise ValueError("Reopen the Studio import to review projects whose study identity could not be "
+                                 "checked before creating a new project.\n" + "\n".join(unreviewed))
             destination = _unique_project_root(root, imported.project_title)
             rename_with_retry(work, destination)
     return Project.load(destination)
@@ -501,8 +576,8 @@ def _publish(root, imported, review, state, setup, hardware, group_assignments, 
             registry.update(registration_tool_updates(root, active, revised_cohort=True))
             prior_result = _preserve_reviewed_result(root, previous)
             if prior_result:
-                history[-1]["previous_result"] = prior_result
-        evidence = root / ".fpvs_imports" / "studio" / f"{imported.source_sha256}.json"
+                history[-1]["previous_result"], history[-1]["previous_result_sha256"] = prior_result
+        evidence = studio_evidence_path(root, imported.source_sha256)
         if not evidence.exists():
             evidence.parent.mkdir(parents=True, exist_ok=True)
             with atomic_write(evidence, replace=replace_with_retry) as stream:
@@ -512,9 +587,7 @@ def _publish(root, imported, review, state, setup, hardware, group_assignments, 
     return Project.load(root)
 
 
-def _preserve_reviewed_result(root: Path, previous: Mapping[str, Any]) -> str | None:
-    from shutil import copyfileobj
-    from Main_App.io.atomic_write import atomic_write
+def _preserve_reviewed_result(root: Path, previous: Mapping[str, Any]) -> tuple[str, str] | None:
     from Main_App.processing.artifact_freshness import (
         ANALYSIS_READY_FULL_AUDIT_ARTIFACT, StalePostProcessingArtifactError,
         canonical_artifact_path, require_current_artifact,
@@ -525,12 +598,7 @@ def _preserve_reviewed_result(root: Path, previous: Mapping[str, Any]) -> str | 
     except StalePostProcessingArtifactError:
         return None
     coverage = digest({k: v for k, v in previous.items() if k != "history"})
-    destination = root / ".fpvs_imports" / "studio" / "prior-results" / f"{coverage}.xlsx"
-    destination.parent.mkdir(exist_ok=True, parents=True)
-    if not destination.exists():
-        with original.open("rb") as source, atomic_write(destination, binary=True) as target:
-            copyfileobj(source, target)
-    return destination.relative_to(root).as_posix()
+    return archive_reviewed_result(root, original, coverage, previous.get("current_result", {}).get("workbook_sha256"))
 
 
 def _released_result(root, workbook_path, manifest):

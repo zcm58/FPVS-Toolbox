@@ -17,6 +17,79 @@ from tests.test_brain_products_reader import _with_captrak_header, _write_bvcdf,
 BP = {"hardware_platform": "brain_products", "hardware_confirmed": True}
 
 
+@pytest.mark.parametrize("writer", [_write_bvcdf, _write_bvrf])
+def test_studio_bound_brainvision_admission_checks_every_member_hash(tmp_path, writer):
+    from Main_App.io.bids_loader import read_project_bids_raw
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.projects.studio_recording_identity import STUDIO_SOURCE_APPROVALS_KEY, studio_source_approvals
+
+    source, _ = writer(tmp_path)
+    if source.suffix == ".bvrh":
+        source.with_suffix(".bvri").write_bytes(b"Reviewed impedance")
+    members = recording_content_identity(source)
+    approved = source_hashes_by_file(members)
+    visit = {"raw_file": source.name, "decision": "matched", "protocol_version_id": "1",
+             "source_sha256_by_file": approved, "recording_sources": list(members)}
+    cohort = {"raw_folder": str(tmp_path), "visits": {"visit": visit}, "versions": ["1"]}
+    manifest = {"tools": {"studio_cohort": cohort}}
+    settings = {**BP, "project_root": str(tmp_path)}
+    app = SimpleNamespace(currentProject=SimpleNamespace(manifest=manifest, project_root=tmp_path))
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with read_project_bids_raw(app, source, settings=settings) as raw:
+        assert raw._studio_source_sha256_by_file == approved
+        assert "source_sha256_by_file" not in raw._fpvs_bids_import
+    approvals = studio_source_approvals(manifest)
+    prepared = prepare_bids_recording(source, project_root=tmp_path, settings={
+        **settings, "stim_channel": "Status", STUDIO_SOURCE_APPROVALS_KEY: approvals})
+    assert prepared.reused and prepared.studio_source_sha256_by_file == approved
+    member = Path(members[-1]["path"])
+    content = member.read_bytes()
+    member.write_bytes(content[:-1] + bytes([content[-1] ^ 1]))
+    with pytest.raises(ValueError, match="differs from its Studio approval"):
+        read_project_bids_raw(app, source, settings=settings)
+    with pytest.raises(ValueError, match="differs from its Studio approval"):
+        prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_content_approval_uses_existing_cold_and_warm_bids_hash_passes(tmp_path, monkeypatch, reviewed):
+    from collections import Counter
+    import hashlib
+    from Main_App.io.bids_loader import read_project_bids_raw
+    from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
+    from Main_App.projects import studio_recording_identity
+
+    source, _ = _write_bvcdf(tmp_path)
+    members = recording_content_identity(source)
+    expected = source_hashes_by_file(members)
+    cohort = {"raw_folder": str(tmp_path), "versions": ["1"], "visits": {"visit": {
+        "raw_file": source.name, "decision": "matched", "protocol_version_id": "1",
+        "source_sha256_by_file": expected,
+    }}}
+    manifest = {"tools": {"studio_cohort": cohort}} if reviewed else {}
+    app = SimpleNamespace(currentProject=SimpleNamespace(project_root=tmp_path, manifest=manifest))
+    settings = {**BP, "project_root": str(tmp_path)}
+    counted = Counter()
+    original_hash = hashlib.file_digest
+
+    def count(stream, *args, **kwargs):
+        if getattr(stream, "name", None) in expected:
+            counted[stream.name] += 1
+        return original_hash(stream, *args, **kwargs)
+
+    def unexpected_read(_):
+        pytest.fail("Active project admission reread the manifest.")
+
+    monkeypatch.setattr(hashlib, "file_digest", count)
+    monkeypatch.setattr(studio_recording_identity, "read_project_studio_source_approvals", unexpected_read)
+    for reused, passes in ((False, 2), (True, 1)):
+        counted.clear()
+        with read_project_bids_raw(app, source, settings=settings) as raw:
+            assert raw._fpvs_bids_import["reused"] is reused
+            assert getattr(raw, "_studio_source_sha256_by_file", None) == (expected if reviewed else None)
+        assert counted == {path: passes for path in expected}
+
+
 def test_bdf_import_is_byte_exact_and_restores_annotations(tmp_path):
     values = [0, -1, 8388607, -8388608] + [7] * 246
     status = [0, 123, 123, 0] + [0] * 246
@@ -118,6 +191,92 @@ def test_bvrf_double_nonlinear_calibration_stays_bitwise_exact(tmp_path):
     prepared = prepare_bids_recording(source, project_root=tmp_path, settings=BP)
     with read_brain_products_raw(source) as old, read_bids_recording(prepared) as new:
         np.testing.assert_array_equal(old.get_data(), new.get_data())
+
+
+@pytest.mark.parametrize("field", ["DataFile", "MarkerFile"])
+def test_import_requires_companions_in_the_selected_recording_folder(tmp_path, field):
+    recording = tmp_path / "recording"
+    recording.mkdir()
+    source, _ = _write_bvcdf(recording)
+    name = {"DataFile": "signal.eeg", "MarkerFile": "events.vmrk"}[field]
+    # An operator moving just one component makes this recording incomplete.
+    (recording / name).rename(tmp_path / name)
+    text = source.read_text(encoding="utf-8").replace(f"{field}={name}", f"{field}=../{name}")
+    source.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the recording folder"):
+        prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    assert not list((tmp_path / ".fpvs_cache" / "bids-import").glob("*/import.json"))
+
+
+def test_nested_brainvision_companions_round_trip(tmp_path):
+    source, expected = _write_bvcdf(tmp_path)
+    for folder in ("markers", "samples"):
+        (tmp_path / folder).mkdir()
+    marker = (tmp_path / "events.vmrk").rename(tmp_path / "markers" / "events.vmrk")
+    (tmp_path / "signal.eeg").rename(tmp_path / "samples" / "signal.eeg")
+    source.write_text(source.read_text(encoding="utf-8").replace("=signal.eeg", r"=samples\signal.eeg")
+                      .replace("=events.vmrk", "=markers/events.vmrk"), encoding="utf-8")
+    marker.write_text(marker.read_text().replace("=signal.eeg", "=../samples/signal.eeg"))
+    prepared = prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    assert prepare_bids_recording(source, project_root=tmp_path, settings=BP).reused
+    with read_bids_recording(prepared) as raw:
+        np.testing.assert_allclose(raw.get_data()[:2], expected, rtol=1e-14, atol=0)
+
+
+def test_linked_brainvision_companion_directory_stays_within_recording_root(tmp_path):
+    import sys
+
+    recording = tmp_path / "recording"
+    recording.mkdir()
+    source, _ = _write_bvcdf(recording)
+    moved = tmp_path / "moved"
+    moved.mkdir()
+    (recording / "signal.eeg").rename(moved / "signal.eeg")
+    link = recording / "samples"
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(moved), str(link))
+    else:
+        link.symlink_to(moved, target_is_directory=True)
+    source.write_text(source.read_text(encoding="utf-8").replace("=signal.eeg", "=samples/signal.eeg"), encoding="utf-8")
+    with pytest.raises(ValueError, match="inside the recording folder"):
+        prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+
+
+@pytest.mark.parametrize("writer,removed", [
+    (_write_bvcdf, ".eeg"), (_write_bvrf, ".fif"), (_write_bvrf, ".bvrd"),
+    (None, ".bdf"), (None, "_events.tsv"),
+])
+def test_cache_rebuilds_when_receipt_omits_required_recording_component(tmp_path, writer, removed):
+    source = writer(tmp_path)[0] if writer else write_bdf(tmp_path / "native.bdf", record_onsets=("0",))
+    settings = BP if writer else {}
+    first = prepare_bids_recording(source, project_root=tmp_path, settings=settings)
+    assert prepare_bids_recording(source, project_root=tmp_path, settings=settings).reused
+    receipt = json.loads(first.manifest_path.read_bytes())
+    receipt["outputs"] = [row for row in receipt["outputs"] if not row["path"].endswith(removed)]
+    first.manifest_path.write_text(json.dumps(receipt))
+    repaired = prepare_bids_recording(source, project_root=tmp_path, settings=settings)
+    assert not repaired.reused and repaired.manifest_path != first.manifest_path
+    assert prepare_bids_recording(source, project_root=tmp_path, settings=settings).reused
+
+
+@pytest.mark.parametrize("defect", ["empty", "duplicate", "subject", "representation", "extension", "unlisted", "recording"])
+def test_cache_rebuilds_with_inconsistent_publication_descriptor(tmp_path, defect):
+    source = write_bdf(tmp_path / "native.bdf", record_onsets=("0",))
+    first = prepare_bids_recording(source, project_root=tmp_path)
+    receipt = json.loads(first.manifest_path.read_bytes())
+    if defect == "empty":
+        receipt["outputs"].clear()
+    elif defect == "duplicate":
+        receipt["outputs"][0] = receipt["outputs"][1]
+    elif defect == "unlisted":
+        (first.dataset_root / "unlisted.tsv").write_text("unused")
+    elif defect == "recording":
+        receipt["recording"] = list(receipt["recording"])
+    else:
+        receipt[defect] = "unknown"
+    first.manifest_path.write_text(json.dumps(receipt))
+    assert not prepare_bids_recording(source, project_root=tmp_path).reused
 
 
 def test_bvrf_fiducials_and_native_metadata_survive_fif_precision_roundtrip(tmp_path):

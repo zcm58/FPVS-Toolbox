@@ -57,6 +57,7 @@ from Main_App.processing.fft_multinotch import (
     FFT_MULTINOTCH_HALF_WIDTH_HZ,
     FFT_MULTINOTCH_METHOD_VERSION,
 )
+from Main_App.projects.studio_recording_identity import studio_source_approval, studio_source_approvals
 from Main_App.projects.frequency_protocol import (
     FrequencyProtocol,
     FrequencyProtocolError,
@@ -117,8 +118,10 @@ RUNS_FILENAME = "processing_runs.jsonl"
 PROCESSING_FINGERPRINT_VERSION = (
     "processing_fingerprint_v13_v3_trigger_alignment"
 )
-_GEOMETRY_INDEPENDENT_EXCLUSION_REASONS = frozenset(
+_ALL_CONDITIONS_EXCLUDED = "all_conditions_excluded_from_analysis"
+_PRE_ADMISSION_EXCLUSION_REASONS = frozenset(
     {
+        _ALL_CONDITIONS_EXCLUDED,
         "manual_participant_exclusion",
         "manual_recording_exclusion",
         "recording_not_started",
@@ -216,6 +219,7 @@ class ProcessingPlan:
     preprocessing_qc_settings: Mapping[str, bool] = field(default_factory=dict)
     pipeline_settings_identity: str = ""
     recording_settings: Mapping[str, dict] = field(default_factory=dict)
+    studio_source_approvals: Mapping[str, dict] = field(default_factory=dict)
 
     @property
     def completed_count(self) -> int:
@@ -281,6 +285,11 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, Sequence):
         return [str(item) for item in value if str(item).strip()]
     return []
+
+
+def _worker_source_evidence(result: Mapping[str, Any]) -> dict[str, object]:
+    hashes = result.get("source_sha256_by_file")
+    return {"source_sha256_by_file": dict(hashes)} if isinstance(hashes, Mapping) and hashes else {}
 
 
 def _export_receipts_payload(
@@ -773,6 +782,15 @@ def raw_file_metadata(file_path: Path) -> dict[str, Any]:
     }
 
 
+def entry_matches_studio_approval(approvals: Mapping, path: Path, entry: Mapping) -> bool:
+    """Require actual worker evidence for decisions made from a Studio recording."""
+    if not approvals or (entry.get("status") == "excluded"
+                         and entry.get("exclusion_reason") in _PRE_ADMISSION_EXCLUSION_REASONS):
+        return True
+    approved = studio_source_approval(approvals, path)
+    return approved is None or approved == entry.get("source_sha256_by_file")
+
+
 def _recording_identity_payload(info: RawFileInfo) -> dict[str, Any]:
     """Return legacy-compatible participant identity plus optional visit data."""
 
@@ -1095,8 +1113,10 @@ def _preprocessing_qc_required_entries(
             for condition in conditions
         ):
             continue
-        if (entry.get("status") == "excluded"
-                and entry.get("exclusion_reason") in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS):
+        # Current condition exclusions were checked above. A prior all-conditions
+        # decision cannot exempt a recording after a condition is restored.
+        if (entry.get("status") == "excluded" and entry.get("exclusion_reason") != _ALL_CONDITIONS_EXCLUDED
+                and entry.get("exclusion_reason") in _PRE_ADMISSION_EXCLUSION_REASONS):
             continue
         yield identity, entry
 
@@ -1246,6 +1266,7 @@ def classify_processing_inputs(
     )
 
     settings_identity = project_pipeline_settings_identity(project)
+    approvals = studio_source_approvals(getattr(project, "manifest", None))
     require_settings_receipt = pipeline_settings_requirement_enabled(getattr(project, "manifest", {}) or {})
     geometry_identity = _configured_geometry_identity(settings)
     excluded_participants = {
@@ -1295,6 +1316,13 @@ def classify_processing_inputs(
             continue
 
         entry_status = str(entry.get("status") or "incomplete")
+        if not entry_matches_studio_approval(approvals, info.path, entry):
+            states.append(ProcessingInputState(
+                info=info, participant_id=participant_id, status="changed_raw",
+                reason="The processing record does not match the approved Studio recording and companions.",
+                expected_outputs=expected_outputs,
+            ))
+            continue
         original_settings = entry.get("recording_settings", historical_settings.get(processing_id))
         settings_match = entry.get("processing_fingerprint") == fingerprint or recording_settings_match(
             original_settings, scoped_settings[processing_id],
@@ -1341,9 +1369,14 @@ def classify_processing_inputs(
                     )
                 )
                 continue
-            geometry_independent = (
-                exclusion_reason in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
-            )
+            if exclusion_reason == _ALL_CONDITIONS_EXCLUDED and not settings_match:
+                states.append(ProcessingInputState(
+                    info=info, participant_id=participant_id, status="changed_settings",
+                    reason="Recheck the prior condition exclusions against the current recording settings.",
+                    expected_outputs=expected_outputs,
+                ))
+                continue
+            geometry_independent = exclusion_reason in _PRE_ADMISSION_EXCLUSION_REASONS
             if not geometry_independent:
                 if require_settings_receipt and entry.get("pipeline_settings_identity") != settings_identity:
                     states.append(ProcessingInputState(
@@ -1587,6 +1620,7 @@ def classify_processing_inputs(
         ),
         pipeline_settings_identity=settings_identity,
         recording_settings=scoped_settings,
+        studio_source_approvals=approvals,
     )
 
 
@@ -1684,6 +1718,7 @@ def with_processing_choice(plan: ProcessingPlan, choice: str) -> ProcessingPlan:
         preprocessing_qc_settings=plan.preprocessing_qc_settings,
         pipeline_settings_identity=plan.pipeline_settings_identity,
         recording_settings=plan.recording_settings,
+        studio_source_approvals=plan.studio_source_approvals,
     )
 
 
@@ -1692,6 +1727,7 @@ def _state_still_matches_ledger(
     state: ProcessingInputState,
     entries: Mapping[str, Any] | None = None,
     cancel_event: Event | None = None,
+    approvals: Mapping | None = None,
 ) -> bool:
     if entries is None:
         entries = load_ledger(Path(project.project_root)).get("entries", {})
@@ -1701,6 +1737,10 @@ def _state_still_matches_ledger(
     if not isinstance(entry, Mapping):
         return False
 
+    if approvals is None:
+        approvals = studio_source_approvals(getattr(project, "manifest", None))
+    if not entry_matches_studio_approval(approvals, state.info.path, entry):
+        return False
     raw_meta = raw_file_metadata(state.info.path)
     if (
         entry.get("raw_file") != raw_meta["raw_file"]
@@ -1746,6 +1786,7 @@ def carry_forward_pre_qc_completed_states(
     if not any(state.status == "changed_settings" for state in current_plan.states):
         return current_plan
     current_entries = load_ledger(Path(project.project_root)).get("entries", {})
+    approvals = studio_source_approvals(getattr(project, "manifest", None))
     pre_by_path: dict[Path, ProcessingInputState] = {}
     for state in pre_qc_plan.states:
         try:
@@ -1776,7 +1817,7 @@ def carry_forward_pre_qc_completed_states(
                     current_plan.recording_settings[current.processing_id],
                 )
             )
-            and _state_still_matches_ledger(project, current, current_entries, cancel_event)
+            and _state_still_matches_ledger(project, current, current_entries, cancel_event, approvals)
             and not _authorized_recording_review_changed(
                 project, current.processing_id,
                 current_entries.get(current.processing_id, {}),
@@ -1807,6 +1848,7 @@ def carry_forward_pre_qc_completed_states(
         preprocessing_qc_settings=current_plan.preprocessing_qc_settings,
         pipeline_settings_identity=current_plan.pipeline_settings_identity,
         recording_settings=current_plan.recording_settings,
+        studio_source_approvals=approvals,
     )
 
 
@@ -1833,6 +1875,7 @@ def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> i
     from Main_App.processing.retained_source_derivatives import STAMP, source_commit_stamp, verified_retained_sources
 
     retained_sources = None
+    approvals = studio_source_approvals(getattr(project, "manifest", None))
     changed = 0
     for state in plan.states:
         if state.status not in {"completed", "excluded"}:
@@ -1846,6 +1889,8 @@ def refresh_skipped_ledger_fingerprints(project: Any, plan: ProcessingPlan) -> i
         entry = entries.get(state.processing_id)
         if not isinstance(entry, dict):
             continue
+        if not entry_matches_studio_approval(approvals, state.info.path, entry):
+            raise ValueError(f"Prior processing evidence for {state.processing_id} differs from its Studio approval.")
         updates = {
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
             "processing_fingerprint": plan.fingerprint,
@@ -2287,6 +2332,7 @@ def record_processing_results(
             **_recording_identity_payload(state.info),
             "group_id": state.info.group,
             **raw_meta,
+            **_worker_source_evidence(result),
             "native_sampling_rate_hz": (audit.get("source_analysis_span_plan") or {}).get("source_grid", {}).get("sfreq_hz"),
             "analysis_sampling_rate_hz": (audit.get("realized_analysis_span_plan") or {}).get("target_grid", {}).get("sfreq_hz"),
             "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
@@ -2333,7 +2379,7 @@ def record_processing_results(
             exclusion_reason = str(excluded_result.get("reason") or "excluded")
             geometry_independent = (
                 exclusion_reason.strip().casefold()
-                in _GEOMETRY_INDEPENDENT_EXCLUSION_REASONS
+                in _PRE_ADMISSION_EXCLUSION_REASONS
             )
             geometry_identity = _result_geometry_identity(
                 excluded_result,
@@ -2383,6 +2429,7 @@ def record_processing_results(
                 **_recording_identity_payload(state.info),
                 "group_id": state.info.group,
                 **raw_file_metadata(state.info.path),
+                **_worker_source_evidence(excluded_result),
                 "processing_fingerprint_version": PROCESSING_FINGERPRINT_VERSION,
                 "processing_fingerprint": plan.fingerprint,
                 "preprocessing_qc_settings": dict(plan.preprocessing_qc_settings) or _preprocessing_qc_settings_snapshot({}),
