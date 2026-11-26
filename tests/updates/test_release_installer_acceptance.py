@@ -124,6 +124,56 @@ def test_installed_evidence_checks_bytes_and_registration(acceptance, tmp_path, 
         acceptance.assert_installed(bundle, manifest, "3.0.0")
 
 
+def test_upgrade_checks_current_files_once_and_still_reports_obsolete_files(acceptance, tmp_path, monkeypatch):
+    import build_installer_inventory as inventory
+
+    destination = tmp_path / "installed"
+    destination.mkdir()
+    executable = destination / "FPVS_Toolbox.exe"
+    executable.write_bytes(b"inert current artifact")
+    output = tmp_path / "inventory"
+    inventory.build_inventories(bundle_root=destination, app_version="3.0.0", legacy_inventory=None, output_dir=output)
+    manifest = output / "current-owned-files.txt"
+    (destination / "fpvs-owned-files-v1.txt").write_bytes(manifest.read_bytes())
+    obsolete = destination / "obsolete.pyd"
+    obsolete.write_bytes(b"inert obsolete artifact")
+    catalog = tmp_path / "legacy.json"
+    catalog.write_text(json.dumps({"schema_version": 1, "application": "fpvs-toolbox",
+        "releases": [{"tag": "v2.1.2", "asset_name": "FPVSToolbox-2.1.2-setup.exe",
+                      "asset_id": 450622129, "size_bytes": 141503904, "sha256": acceptance.BASELINE_SHA256}],
+        "files": [{"path": path.name, "sha256": [inventory.sha256_file(path)]}
+                  for path in (executable, obsolete)]}))
+    monkeypatch.setattr(acceptance, "DEFAULT_LEGACY_INVENTORY", catalog)
+    record = {"InstallLocation": str(destination), "DisplayVersion": "3.0.0"}
+    monkeypatch.setattr(acceptance, "registrations", lambda: [record])
+
+    real_sha256_file = inventory.sha256_file
+    reads = []
+
+    def track_hash(path):
+        reads.append(path)
+        return real_sha256_file(path)
+
+    monkeypatch.setattr(acceptance, "sha256_file", track_hash)
+    monkeypatch.setattr(inventory, "sha256_file", track_hash)
+    installed, tree = acceptance.check_upgraded_installation(destination, manifest, "3.0.0")
+    assert installed == {"version": "3.0.0", "owned_files_verified": 1, "registration": [record]}
+    assert tree["ok"] is False
+    assert tree["remaining_obsolete_owned_files"] == [obsolete.name]
+    assert reads == [executable, obsolete]
+
+    obsolete.unlink()
+    _, tree = acceptance.check_upgraded_installation(destination, manifest, "3.0.0")
+    assert tree["ok"] is True
+    record["DisplayVersion"] = "2.1.2"
+    with pytest.raises(RuntimeError, match="registration does not identify the release"):
+        acceptance.check_upgraded_installation(destination, manifest, "3.0.0")
+    record["DisplayVersion"] = "3.0.0"
+    executable.write_bytes(b"changed bytes")
+    with pytest.raises(RuntimeError, match="Installed release bytes could not be verified"):
+        acceptance.check_upgraded_installation(destination, manifest, "3.0.0")
+
+
 def test_baseline_catalog_is_independently_checked_against_installed_bytes(acceptance, tmp_path):
     destination = tmp_path / "installed"
     destination.mkdir()

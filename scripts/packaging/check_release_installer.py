@@ -135,6 +135,14 @@ def assert_sentinels(sentinels: dict[Path, bytes]) -> None:
             raise RuntimeError(f"Installer changed user data: {path}")
 
 
+def assert_installed_registration(destination: Path, version: str) -> list[dict[str, object]]:
+    records = registrations()
+    if not records or any(Path(str(record["InstallLocation"])).resolve() != destination.resolve()
+                          or record.get("DisplayVersion") != version for record in records):
+        raise RuntimeError("Installed registration does not identify the release and its isolated path.")
+    return records
+
+
 def assert_installed(destination: Path, manifest_path: Path, version: str) -> dict[str, object]:
     expected_bytes, manifest = read_manifest_file(manifest_path, expected_kind="current")
     if (destination / "fpvs-owned-files-v1.txt").read_bytes() != expected_bytes:
@@ -142,11 +150,24 @@ def assert_installed(destination: Path, manifest_path: Path, version: str) -> di
     for relative, digests in manifest.files.items():
         if sha256_file(destination / relative) != digests[0]:
             raise RuntimeError(f"Installed release bytes differ: {relative}")
-    records = registrations()
-    if not records or any(Path(str(record["InstallLocation"])).resolve() != destination.resolve()
-                          or record.get("DisplayVersion") != version for record in records):
-        raise RuntimeError("Installed registration does not identify the release and its isolated path.")
+    records = assert_installed_registration(destination, version)
     return {"version": version, "owned_files_verified": len(manifest.files), "registration": records}
+
+
+def check_upgraded_installation(
+    destination: Path, manifest_path: Path, version: str
+) -> tuple[dict[str, object], dict[str, object]]:
+    _, manifest = read_manifest_file(manifest_path, expected_kind="current")
+    if any(len(digests) != 1 for digests in manifest.files.values()):
+        raise RuntimeError("The release inventory must identify exactly one digest per installed file.")
+    tree = check_tree(install_root=destination, expected_manifest=manifest_path,
+                      legacy_inventory=DEFAULT_LEGACY_INVENTORY)
+    if not tree["manifest_matches"]:
+        raise RuntimeError("Installed ownership manifest differs from the release build.")
+    if tree["invalid_current_files"]:
+        raise RuntimeError(f"Installed release bytes could not be verified: {tree['invalid_current_files']}")
+    records = assert_installed_registration(destination, version)
+    return {"version": version, "owned_files_verified": tree["current_file_count"], "registration": records}, tree
 
 
 def assert_baseline_catalog(destination: Path, catalog: Path) -> dict[str, object]:
@@ -477,9 +498,8 @@ def main() -> int:
         steps.append({"name": "published-v2.1.2-installed", "registration": baseline_records,
                       **assert_baseline_catalog(destination, DEFAULT_LEGACY_INVENTORY)})
         install(installer, "v3-upgrade")
-        steps.append({"name": "upgrade-v2.1.2", **assert_installed(destination, manifest, version)})
-        tree = check_tree(install_root=destination, expected_manifest=manifest,
-                          legacy_inventory=DEFAULT_LEGACY_INVENTORY)
+        installed, tree = check_upgraded_installation(destination, manifest, version)
+        steps.append({"name": "upgrade-v2.1.2", **installed})
         steps.append({"name": "upgrade-removes-authenticated-obsolete-files", **tree})
         if not tree["ok"]:
             raise RuntimeError("Upgrade retained obsolete published files or changed the current bundle.")
