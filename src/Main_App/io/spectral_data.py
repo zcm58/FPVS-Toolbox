@@ -30,7 +30,8 @@ from Main_App.io.numpy_companion import open_verified_schema
 
 SPECTRAL_MANIFEST_SHEET = "Spectral Data"
 _MAX_CACHED_COMPANIONS = 4
-_MAX_CACHED_VERIFICATIONS = 256
+# Keep the metadata for a full multi-condition study across ordered passes.
+_MAX_CACHED_VERIFICATIONS = 1536
 _MAX_CACHED_HEADER_LABELS = 262_144
 
 

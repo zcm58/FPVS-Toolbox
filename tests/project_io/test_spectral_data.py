@@ -521,6 +521,33 @@ def test_evicted_spectral_verification_rejects_changed_companion_and_is_bounded(
             read_xlsx_sheet_header(paths[1], sheet_name=FFT)
 
 
+def test_cohort_header_pass_reuses_checks_after_dense_payload_eviction(tmp_path, monkeypatch):
+    first = tmp_path / "first.fpvs"
+    frames = _frames()
+    descriptor = write_spectral_companion(first, frames)
+    write_result_manifest(first, sheet_names=list(frames), spectral_companion=descriptor, condition_companion=None)
+    paths = [first, *(tmp_path / f"recording-{index}.fpvs" for index in range(399))]
+    declaration = first.read_bytes()
+    for path in paths[1:]:
+        path.write_bytes(declaration)
+
+    digest_count = 0
+    file_digest = hashlib.file_digest
+
+    def counted_digest(stream, *args, **kwargs):
+        nonlocal digest_count
+        digest_count += 1
+        return file_digest(stream, *args, **kwargs)
+
+    monkeypatch.setattr(hashlib, "file_digest", counted_digest)
+    with xlsx_read_cache_scope():
+        for path in paths:
+            assert spectral_companion_identity(path) == descriptor
+        for path in paths:
+            assert read_xlsx_sheet_header(path, sheet_name=FFT) == frames[FFT].columns.tolist()
+    assert digest_count == len(paths)
+
+
 def test_verified_header_budget_counts_shared_grids_once_and_limits_distinct_grids(tmp_path, monkeypatch):
     from Main_App.io import spectral_data, xlsx_selected_reader as xlsx
 

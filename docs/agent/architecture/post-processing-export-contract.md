@@ -586,10 +586,11 @@ legacy LORETA FullFFT inputs and Individual Detectability use this boundary.
 Plot snapshots capture both dense arrays with their workbook and validate
 source identity before publication. Scalp Maps calculates from the saved
 compact BCA/SNR/Z values. A run-scoped cache retains at most four numerical
-companion payloads per family. A separate cache keeps up to 256 already-verified
-spectral headers and compact schemas so later identity/header passes do not
-reload evicted numerical arrays. Spectral headers share identical immutable
-tuples and are also bounded to 262,144 unique header labels. Reuse requires the
+companion payloads per family. Separate metadata caches keep up to 1,536
+verified spectral header sets and 256 verified compact schemas so later
+identity and header passes can reuse those checks after numerical eviction.
+Spectral headers share identical immutable tuples and are also bounded to
+262,144 unique header labels. Reuse requires the
 same declaration and workbook/companion signatures, including size, modification
 and change times, device, and file ID. First reads still validate checksums and
 schema/grid; new scopes revalidate, and changed signatures invalidate reuse.
