@@ -943,6 +943,9 @@ order during ownership, file-organization, performance, cache, GUI, or
 documentation refactors:
 
 1. Initial reference using the selected reference pair.
+   The qualified BioSemi64 native path evaluates the same float64 pair mean
+   and subtracts it in bounded blocks with MNE reference metadata. Other
+   inputs use MNE’s public pair reference.
 2. Drop the selected reference pair channels.
 3. Optional channel limit through `max_idx_keep`, preserving the stim channel
    when needed.

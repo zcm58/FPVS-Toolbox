@@ -29,6 +29,7 @@ import traceback
 from typing import Callable, Optional, Tuple, Dict, Any, List, Sequence
 
 import mne
+from mne.io.edf.edf import RawEDF
 import numpy as np
 
 from Main_App.diagnostics.audit import (
@@ -56,6 +57,7 @@ from Main_App.processing.fft_multinotch import (
     apply_fft_multinotch,
 )
 from Main_App.processing.guarded_stim_resample import resample_raw
+from Main_App.processing.guarded_initial_reference import try_bounded_initial_reference
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
     AnalysisSpanPlanError,
@@ -88,6 +90,10 @@ __all__ = [
 
 PREPROCESSING_ORDER_VERSION = (
     "filter_then_optional_fft_multinotch_then_downsample_v2"
+)
+_KURTOSIS_RAW_READ_METHODS = tuple(
+    (name, getattr(mne.io.BaseRaw, name))
+    for name in ("get_data", "_getitem", "_parse_get_set_params")
 )
 
 def _build_preproc_fingerprint(
@@ -211,6 +217,36 @@ def _kurtosis_scoring_data(
     if len(spans) == 1:
         start, stop = spans[0]
         return raw.get_data(picks=picks, start=start, stop=stop)
+    return _read_kurtosis_scoring_spans(raw, picks, spans)
+
+
+def _read_kurtosis_scoring_spans(raw, picks, spans) -> np.ndarray:
+    """Pack in-bounds spans while keeping only one MNE sample copy live."""
+    if (
+        type(raw) in (RawEDF, mne.io.RawArray, mne.io.Raw)
+        and raw.preload
+        and spans[-1][1] <= raw.n_times
+        and type(raw._data) in (np.ndarray, np.memmap)
+        and raw._data.dtype == np.float64
+        and raw._data.shape == (len(raw.ch_names), raw.n_times)
+        and raw._data.flags.c_contiguous
+        and all(
+            name not in vars(raw) and getattr(type(raw), name) is method
+            for name, method in _KURTOSIS_RAW_READ_METHODS
+        )
+    ):
+        start, stop = spans[0]
+        first = raw.get_data(picks=picks, start=start, stop=stop)
+        sample_count = sum(end - begin for begin, end in spans)
+        data = np.empty((first.shape[0], sample_count), dtype=first.dtype)
+        offset = stop - start
+        data[:, :offset] = first
+        del first
+        for start, stop in spans[1:]:
+            end = offset + stop - start
+            data[:, offset:end] = raw.get_data(picks=picks, start=start, stop=stop)
+            offset = end
+        return data
     return np.concatenate(
         [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans],
         axis=1,
@@ -1067,11 +1103,12 @@ def _stage_initial_reference(context: PreprocessingContext) -> None:
             log_func(
                 f"Applying reference pair [{ref1}, {ref2}] on {filename_for_log}..."
             )
-            raw.set_eeg_reference(
-                ref_channels=[ref1, ref2],
-                projection=False,
-                verbose=False,
-            )
+            if not try_bounded_initial_reference(raw, (ref1, ref2), policy):
+                raw.set_eeg_reference(
+                    ref_channels=[ref1, ref2],
+                    projection=False,
+                    verbose=False,
+                )
 
             # Mark explicit success in params so the audit layer can trust it
             params["_fpvs_initial_ref_ok"] = True

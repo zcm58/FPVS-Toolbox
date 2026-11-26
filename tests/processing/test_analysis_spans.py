@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import mne
 
+from Main_App.io.eeg_geometry import BIOSEMI64_CHANNELS, biosemi64_geometry_identity
 from Main_App.processing.analysis_spans import (
     ANALYSIS_SPAN_PLAN_VERSION,
     AnalysisSpanPlanError,
@@ -19,6 +20,7 @@ from Main_App.processing.analysis_spans import (
     validate_source_analysis_span_plan,
     validate_target_analysis_span_markers,
 )
+from Main_App.processing.kurtosis_qc import evaluate_kurtosis_qc
 from Main_App.processing.preflight_qc_plan import plan_preflight_qc_events
 from Main_App.processing.preprocess import _kurtosis_scoring_data
 from Main_App.projects import EXPECTED_CYCLES_SOURCE_MANUAL, FrequencyProtocol
@@ -373,6 +375,79 @@ def test_one_kurtosis_span_matches_concatenated_mne_samples(storage, tmp_path) -
             assert not np.shares_memory(result, raw._data)
         result[:] = np.nan
         assert raw.get_data(picks=picks, start=5, stop=17).tobytes() == baseline.tobytes()
+
+
+@pytest.mark.parametrize("storage", ["ram", "fortran", "memmap", "lazy", "clipped"])
+def test_multiple_kurtosis_spans_match_native_concatenation(storage, tmp_path) -> None:
+    data = np.arange(90, dtype=np.float64).reshape(3, 30)
+    data[1, 4] = -0.0
+    data.view(np.uint64)[0, 15] = 0x7FF8000000003210
+    if storage == "fortran":
+        data = np.asfortranarray(data)
+    raw = mne.io.RawArray(
+        data, mne.create_info(["Cz", "Pz", "Fp1"], 6, "eeg"), first_samp=50, verbose=False
+    )
+    if storage in {"memmap", "lazy"}:
+        path = tmp_path / "scoring_raw.fif"
+        raw.save(path, fmt="double", verbose=False)
+        raw.close()
+        preload = str(tmp_path / "scoring.dat") if storage == "memmap" else False
+        raw = mne.io.read_raw_fif(path, preload=preload, verbose=False)
+    with raw:
+        plan_times = raw.n_times + 2 if storage == "clipped" else raw.n_times
+        spans = [(1, 5), (13, 18), (21, plan_times)]
+        params = {"_fpvs_realized_analysis_span_plan": {
+            "target_grid": {"n_times": plan_times},
+            "unique_relative_spans": [list(span) for span in spans],
+            "unique_sample_count": sum(stop - start for start, stop in spans),
+        }}
+        picks = [1, 0, 2]
+        baseline = np.concatenate(
+            [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans], axis=1
+        )
+        result = _kurtosis_scoring_data(raw, picks=picks, params=params)
+
+        assert result.shape == baseline.shape and result.dtype == baseline.dtype
+        assert result.strides == baseline.strides
+        assert result.flags.c_contiguous and result.flags.aligned == baseline.flags.aligned
+        assert result.tobytes() == baseline.tobytes()
+        if raw.preload:
+            assert not np.shares_memory(result, raw._data)
+
+
+def test_staged_kurtosis_evidence_matches_native_span_concatenation() -> None:
+    target_plan = realize_target_analysis_span_plan(
+        read_source_analysis_span_plan(_two_condition_event_plan()),
+        target_sfreq_hz=12,
+        target_n_times=100,
+        target_first_samp=100,
+    )
+    spans = relative_spans_from_plan(target_plan)
+    assert len(spans) == 2
+    channels = BIOSEMI64_CHANNELS[:24]
+    with mne.io.RawArray(
+        np.random.default_rng(145).normal(size=(len(channels), 100)),
+        mne.create_info(list(channels), 12, "eeg"),
+        first_samp=100,
+        verbose=False,
+    ) as raw:
+        picks = list(range(len(channels)))
+        baseline = np.concatenate(
+            [raw.get_data(picks=picks, start=start, stop=stop) for start, stop in spans], axis=1
+        )
+        staged = _kurtosis_scoring_data(
+            raw, picks=picks, params={"_fpvs_realized_analysis_span_plan": target_plan}
+        )
+        kwargs = {
+            "threshold": 5.0,
+            "realized_analysis_span_plan": target_plan,
+            "filter_identity": {"method_version": "filter_v1"},
+            "downsample_identity": {"method_version": "resample_v1"},
+            "geometry_identity": biosemi64_geometry_identity(retained_channels=channels),
+        }
+        assert evaluate_kurtosis_qc(staged, channels, **kwargs).to_payload() == evaluate_kurtosis_qc(
+            baseline, channels, **kwargs
+        ).to_payload()
 
 
 def test_actual_raw_resample_keeps_v3_window_at_nonzero_origin() -> None:
