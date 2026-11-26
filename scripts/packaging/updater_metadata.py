@@ -16,7 +16,7 @@ def windows_version(display_version: str) -> str:
     return ".".join(str(part) for part in (*release, *(0 for _ in range(4 - len(release)))))
 
 
-def version_data(repo: Path) -> tuple[Path, str]:
+def source_version(repo: Path) -> str:
     tree = ast.parse((repo / "src/config.py").read_text(encoding="utf-8-sig"))
     values = [
         ast.literal_eval(n.value)
@@ -25,10 +25,15 @@ def version_data(repo: Path) -> tuple[Path, str]:
     ]
     if len(values) != 1 or not isinstance(values[0], str):
         raise RuntimeError("Toolbox config.py must declare one version.")
+    return values[0]
+
+
+def version_data(repo: Path) -> tuple[Path, str]:
+    version = source_version(repo)
     destination = repo / "build/updater-metadata/toolbox-updater-version.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps({"version": values[0]}), encoding="utf-8")
-    return destination, values[0]
+    destination.write_text(json.dumps({"version": version}), encoding="utf-8")
+    return destination, version
 
 
 if __name__ == "__main__":

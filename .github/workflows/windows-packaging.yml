@@ -18,15 +18,31 @@ concurrency:
   group: windows-release-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  MPLBACKEND: Agg
+  PYTHONNOUSERSITE: "1"
+  FPVS_INSTALLER_EVIDENCE_PATHS: |
+    build/packaged-smoke/
+    build/pyinstaller-updater/packaging-check.json
+    build/pyinstaller-updater/gui-smoke.json
+    build/patch-installer-lifecycle/**/report.json
+    build/patch-installer-lifecycle/**/*.log
+    build/release-acceptance/
+    build/installer-inventory/
+    build/pyinstaller/**/warn-*.txt
+
 jobs:
-  packaged-release:
+  installer-build:
+    name: Build Windows installer candidate
     runs-on: windows-latest
     timeout-minutes: 90
-    env:
-      MPLBACKEND: Agg
-      PYTHONNOUSERSITE: "1"
+    outputs:
+      candidate-artifact-id: ${{ steps.upload-candidate.outputs.artifact-id }}
+      candidate-build-attempt: ${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -53,6 +69,94 @@ jobs:
       - name: Build main application, updater, and release installer
         shell: pwsh
         run: ./scripts/packaging/build_release.ps1 -SkipInstall -AllowVisibleGui
+      - name: Record build provenance
+        if: always()
+        shell: pwsh
+        run: |
+          $evidence = 'build/release-acceptance'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @{
+            commit = $env:GITHUB_SHA
+            run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            runner = $env:RUNNER_OS
+            image = $env:ImageVersion
+          } | ConvertTo-Json | Set-Content -LiteralPath "$evidence/build-provenance.json"
+          if (Test-Path -LiteralPath "$evidence/graphics-driver.json") {
+            Copy-Item -LiteralPath "$evidence/graphics-driver.json" -Destination "$evidence/build-graphics-driver.json"
+          }
+      - name: Record candidate artifact identities
+        run: python scripts/packaging/release_candidate.py record --repo-root . --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID"
+      - name: Retain the immutable installer candidate for acceptance
+        id: upload-candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            installers/
+            ${{ env.FPVS_INSTALLER_EVIDENCE_PATHS }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Retain diagnostics if the candidate build fails
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-evidence-${{ github.sha }}
+          path: ${{ env.FPVS_INSTALLER_EVIDENCE_PATHS }}
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 30
+
+  installer-acceptance:
+    name: Qualify Windows installer candidate
+    needs: installer-build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    env:
+      FPVS_CANDIDATE_ARTIFACT_ID: ${{ needs.installer-build.outputs.candidate-artifact-id }}
+      FPVS_CANDIDATE_BUILD_ATTEMPT: ${{ needs.installer-build.outputs.candidate-build-attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Require the successful build job's artifact identity
+        shell: pwsh
+        run: |
+          if ($env:FPVS_CANDIDATE_ARTIFACT_ID -cnotmatch '^[1-9][0-9]*$' -or
+              $env:FPVS_CANDIDATE_BUILD_ATTEMPT -cnotmatch '^[1-9][0-9]*$') {
+            throw 'Installer build did not provide a candidate artifact identity.'
+          }
+      - name: Download the exact candidate from the successful build job
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.installer-build.outputs.candidate-artifact-id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          merge-multiple: true
+          path: .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned installer verification dependencies
+        run: python -m pip install --constraint requirements.txt packaging psutil
+      - name: Verify candidate provenance and file identities
+        shell: pwsh
+        run: |
+          python scripts/packaging/release_candidate.py verify --repo-root . --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $build = Get-Content -LiteralPath 'build/release-acceptance/build-provenance.json' -Raw | ConvertFrom-Json
+          if ($build.run_attempt -cne $env:FPVS_CANDIDATE_BUILD_ATTEMPT) {
+            throw 'Candidate provenance differs from the successful build attempt.'
+          }
+      - name: Configure native software OpenGL on the disposable runner
+        timeout-minutes: 5
+        run: ./scripts/packaging/setup_ci_opengl.ps1 -Execute
       - name: Fetch the authenticated v2.1.2 upgrade baseline
         shell: pwsh
         env:
@@ -65,27 +169,29 @@ jobs:
           if ($digest -cne '192d43972e8b2031566d3b1bcbc9ae2b46305f39a544d3e12a7e46e6730178a6') { throw 'Published v2.1.2 installer digest differs from the reviewed baseline.' }
       - name: Qualify the exact installer on the disposable native Windows runner
         run: python scripts/packaging/check_release_installer.py --execute --baseline build/release-baseline/FPVSToolbox-2.1.2-setup.exe
-      - name: Record build provenance
+      - name: Record acceptance provenance
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force build/release-acceptance | Out-Null
-          @{ commit = $env:GITHUB_SHA; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"; runner = $env:RUNNER_OS; image = $env:ImageVersion } | ConvertTo-Json | Set-Content build/release-acceptance/build-provenance.json
+          $evidence = 'build/release-acceptance'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @{
+            commit = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            candidate_artifact_id = $env:FPVS_CANDIDATE_ARTIFACT_ID
+            build_run_attempt = $env:FPVS_CANDIDATE_BUILD_ATTEMPT
+            runner = $env:RUNNER_OS
+            image = $env:ImageVersion
+          } | ConvertTo-Json | Set-Content -LiteralPath "$evidence/acceptance-provenance.json"
       - name: Retain acceptance diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-evidence-${{ github.sha }}
-          path: |
-            build/packaged-smoke/
-            build/pyinstaller-updater/packaging-check.json
-            build/pyinstaller-updater/gui-smoke.json
-            build/patch-installer-lifecycle/**/report.json
-            build/patch-installer-lifecycle/**/*.log
-            build/release-acceptance/
-            build/installer-inventory/
-            build/pyinstaller/**/warn-*.txt
+          path: ${{ env.FPVS_INSTALLER_EVIDENCE_PATHS }}
           if-no-files-found: warn
+          overwrite: true
           retention-days: 30
       - name: Retain qualified installer
         uses: actions/upload-artifact@v4
@@ -94,4 +200,5 @@ jobs:
           path: installers/*
           if-no-files-found: error
           compression-level: 0
+          overwrite: true
           retention-days: 30

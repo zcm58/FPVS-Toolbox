@@ -240,11 +240,19 @@ validation details; for example, "Improved app updates and patch installation."
 
 ## Verification and manual acceptance
 
-The `Windows release acceptance` workflow builds the main executable, independent
-updater, and installer from its exact commit on a disposable GitHub Windows
-runner. It retains the installer, checksums, ownership inventory, source commit,
-dependency reports, visible Main Window reports, and native installer logs as
-workflow artifacts. It does not publish a GitHub Release.
+The `Windows release acceptance` workflow uses two disposable GitHub Windows
+runners. The `installer-build` job builds the main executable, independent updater,
+and installer, runs the packaged smoke checks, and retains a candidate bound to
+the workflow run, source commit, and checksums. The `installer-acceptance` job
+downloads and verifies that candidate before testing the exact installer bytes
+on a clean runner. Successful acceptance retains the qualified installer as
+`windows-release-installer-<sha>` and the ownership inventory, provenance,
+smoke reports, and native installer logs as `windows-release-evidence-<sha>`.
+
+Use GitHub's **Re-run failed jobs** to retry acceptance from a successful build's
+candidate, which is retained for 30 days. **Re-run all jobs** rebuilds the installer.
+Stage or publish only the qualified archive from a successful acceptance run with
+passing source CI on the same commit. GitHub Release publication is a separate step.
 
 A bounded native source probe runs before compilation to identify runtime
 startup failures quickly; the frozen executable must still pass its own probe.
