@@ -4,7 +4,7 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
-from PySide6.QtCore import QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import QPushButton, QStackedWidget, QWidget
 
 from Main_App.gui import project_workflows
@@ -307,19 +307,39 @@ def test_source_build_starts_when_opened_and_drains_after_project_reset(
 ):
     workspace, home, window = source_workspace
     entered = Event()
-    release = Event()
+    released = Event()
     cancelled = Event()
 
+    class ReleaseSourceBuild(QObject):
+        requested = Signal()
+
+    release = ReleaseSourceBuild()
+
+    def release_worker():
+        released.set()
+        release.requested.emit()
+
     class ControlledSourceWorker(gui.ProjectSourceMapExportWorker):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._completed = False
+            release.requested.connect(self.complete, Qt.ConnectionType.QueuedConnection)
+
         @Slot()
         def run(self):
             self.build_stage.emit("Building L2-MNE", 1, 2)
             entered.set()
-            try:
-                if release.wait(timeout=5) and self.cancellation.requested:
-                    cancelled.set()
-            finally:
-                self.finished.emit()
+            if released.is_set():
+                self.complete()
+
+        @Slot()
+        def complete(self):
+            if self._completed:
+                return
+            self._completed = True
+            if self.cancellation.requested:
+                cancelled.set()
+            self.finished.emit()
 
     monkeypatch.setattr(gui, "default_project_source_manifest_paths", lambda _root: ())
     monkeypatch.setattr(gui, "ProjectSourceMapExportWorker", ControlledSourceWorker)
@@ -340,10 +360,10 @@ def test_source_build_starts_when_opened_and_drains_after_project_reset(
         assert window._source_export_thread is not None
         assert window._source_export_worker.cancellation.requested
         with qtbot.waitSignal(window.destroyed, timeout=5000):
-            release.set()
+            release_worker()
         assert cancelled.is_set()
     finally:
-        release.set()
+        release_worker()
 
 
 def test_current_maps_reload_only_when_opened_after_a_new_release(
