@@ -222,10 +222,11 @@ Common long-running work:
   FFT/export work and cleanup. Pool floors and host reserves remain part of the
   budget, and owned-memory offsets require matching process identity. Active
   jobs are accounted for until they finish; executors resize only after draining.
-  A reduced pool deliberately stops refilling when recovered headroom supports
-  a larger useful population, including partial recovery below the CPU ceiling.
-  Current jobs, phase grants and cancellation continue through that drain; the
-  population is chosen again from fresh headroom after all owners finish.
+  Pool sizing checks a group of recordings against live headroom and all
+  worker floors. When a larger group fits, a reduced pool drains before
+  resizing. Current jobs, phase grants and cancellation continue through
+  the drain. Wait telemetry separates idle time from time with recordings
+  in flight, and reports physical RAM, commit, and soft-limit reasons.
   The scheduler keeps source order among recordings that fit. An exclusive
   recording waits for its predecessors to finish before starting. Each admitted
   job receives its own event plan and recording-specific kurtosis decision.
