@@ -591,6 +591,17 @@ indices for reads. It also carries stable event-plan, protocol, occurrence,
 approved-span, and source-span fingerprints. Normal processing validates this
 exact plan against the source event stream before any signal-based raw QC.
 
+For an in-memory occurrence that preflight owns, consecutive regular
+half-overlapping diagnostic windows can reuse the shared half's exact
+percentile rank candidates. The producer does not mutate the borrowed data
+while the built-in evaluator runs. Reuse state clears at the occurrence
+boundary. Full-occurrence metrics, nonfinite or noncontiguous data, short
+or tail-aligned windows, and other callers keep the established row evaluation.
+The optimization requires the pinned NumPy interpolation implementation and
+default numerical error policy. Bounds near floating-point extremes use its
+established percentile implementation directly.
+The calculation order, review evidence, and method fingerprints are unchanged.
+
 Processing-time raw-channel metrics use the unique union of approved source
 spans. After the continuous filter/downsample stages, the approved starting
 marker maps to the same stimulus sampling window used by MNE in the v3 release.

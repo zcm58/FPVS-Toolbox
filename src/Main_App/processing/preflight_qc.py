@@ -2169,6 +2169,7 @@ def _scan_one_preflight_file_v2(
                                 ),
                                 window_hop_s=PREFLIGHT_QC_TRANSIENT_WINDOW_HOP_S,
                                 should_cancel=should_cancel,
+                                _owned_condition_data=None if disk_buffered else condition_data,
                             )
                         )
                     except ConditionRawChannelQCCancelled as exc:

@@ -295,3 +295,78 @@ def test_condition_metrics_flags_and_sample_evidence_match_baseline(
     assert json.dumps(actual.to_payload(), sort_keys=True) == json.dumps(
         expected.to_payload(), sort_keys=True
     )
+
+
+@pytest.mark.parametrize("variant", [
+    "regular", "nonfinite", "signed_zero", "strided", "different_buffer",
+    "tiny", "large", "other_numpy", "other_error_policy",
+])
+def test_native_occurrence_overlap_tails_match_full_window_metrics(monkeypatch, variant):
+    names = BIOSEMI64_CHANNELS[:8]
+    sfreq = 1024.0
+    window, hop = 5120, 2560
+    stops_at = 13111
+    source = np.random.default_rng(126).normal(0.0, 8e-5, (len(names), stops_at))
+    if variant == "nonfinite":
+        source[1, 6] = np.nan
+    elif variant == "signed_zero":
+        source[0, ::2] = 0.0
+        source[0, 1::2] = -0.0
+    elif variant == "strided":
+        source = np.asfortranarray(source)
+    elif variant == "tiny":
+        source[0] *= 1e-200
+    elif variant == "large":
+        source[0] = np.where(source[0] < 0.0, -np.finfo(np.float64).max, np.finfo(np.float64).max)
+    elif variant == "other_numpy":
+        monkeypatch.setattr(np, "__version__", "other_runtime")
+    buffer = source.copy() if variant == "different_buffer" else source
+    starts = (0, hop, 2 * hop, 3 * hop, stops_at - window)
+    blocks = tuple(
+        qc.ConditionRawChannelQCBlock(
+            condition_id="faces", occurrence=1, start_sample=200 + start,
+            stop_sample=200 + start + window, data=source[:, start:start + window],
+            is_final=index == len(starts) - 1,
+            window_kind="tail_aligned" if index == len(starts) - 1 else "regular",
+        )
+        for index, start in enumerate(starts)
+    )
+    calls = []
+    full_metrics = []
+    original_tails = qc._OccurrenceTails._tails
+    original_metrics = qc._v2_metric_rows
+
+    def tails(self, data):
+        calls.append(data.shape)
+        return original_tails(self, data)
+
+    def metric_rows(data, channel_names):
+        full_metrics.append(data.shape)
+        return original_metrics(data, channel_names)
+
+    monkeypatch.setattr(qc._OccurrenceTails, "_tails", tails)
+    monkeypatch.setattr(qc, "_v2_metric_rows", metric_rows)
+    under = "raise" if variant == "other_error_policy" else "ignore"
+
+    def evaluate(owned):
+        with np.errstate(under=under), warnings.catch_warnings(record=True) as issued:
+            warnings.simplefilter("always", RuntimeWarning)
+            result = qc.evaluate_condition_raw_channel_qc_v2(
+                blocks, names, {}, filename="synthetic.bdf", sfreq=sfreq,
+                block_duration_s=5.0, window_hop_s=2.5, _owned_condition_data=owned,
+            )
+        return result, [str(item.message) for item in issued]
+
+    expected, expected_warnings = evaluate(None)
+    baseline_metric_calls = full_metrics.copy()
+    full_metrics.clear()
+    actual, actual_warnings = evaluate(buffer)
+    assert json.dumps(actual.to_payload(), sort_keys=True) == json.dumps(expected.to_payload(), sort_keys=True)
+    assert actual_warnings == expected_warnings
+    prefix_counts = {
+        "regular": 5, "nonfinite": 4, "signed_zero": 5, "strided": 0, "different_buffer": 0,
+        "tiny": 5, "large": 5, "other_numpy": 0, "other_error_policy": 0,
+    }
+    assert calls == [(len(names), hop)] * prefix_counts[variant]
+    if variant in ("tiny", "large", "other_numpy", "other_error_policy"):
+        assert full_metrics == baseline_metric_calls

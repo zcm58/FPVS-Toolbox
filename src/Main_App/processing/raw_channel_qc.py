@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from collections.abc import Callable, Iterable
+from functools import partial
 from math import isfinite
 from typing import Any, Mapping, Sequence
 
@@ -1990,6 +1991,14 @@ def _v2_thresholds(config: RawChannelQCConfig) -> dict[str, float | int | bool]:
     }
 
 
+_V2_METRIC_PERCENTILES = (0.05, 0.5, 99.5, 99.95)
+_V2_METRIC_BATCH_BYTES = 8 * 1024 * 1024
+_OVERLAP_PERCENTILE_NUMPY_VERSION = "2.3.1"
+_DEFAULT_NUMPY_ERRORS = {"divide": "warn", "over": "warn", "under": "ignore", "invalid": "warn"}
+_OVERLAP_BOUND_MAX = np.finfo(np.float64).max / 2.0
+_OVERLAP_BOUND_MIN = np.sqrt(np.finfo(np.float64).tiny)
+
+
 def _v2_channel_metrics(channel: str, values: np.ndarray) -> RawChannelMetricSet:
     """Apply the v1 float64 formulas with one vectorized percentile call."""
 
@@ -1997,10 +2006,10 @@ def _v2_channel_metrics(channel: str, values: np.ndarray) -> RawChannelMetricSet
     finite_row = (values64.size > 0 and values64.strides == (values64.itemsize,)
                   and bool(np.isfinite(values64).all()))
     if finite_row:
-        percentiles = np.percentile(values64, [0.05, 0.5, 99.5, 99.95])
+        percentiles = np.percentile(values64, _V2_METRIC_PERCENTILES)
         std_uv = float(np.std(values64) * 1e6)
     else:
-        percentiles = np.nanpercentile(values64, [0.05, 0.5, 99.5, 99.95])
+        percentiles = np.nanpercentile(values64, _V2_METRIC_PERCENTILES)
         std_uv = float(np.nanstd(values64) * 1e6)
     return RawChannelMetricSet(
         channel=channel,
@@ -2026,32 +2035,114 @@ def _v2_metric_rows(
         and data.shape[0] == len(channel_names)
         and data.shape[0] > 1
         and data.shape[1] > 0
-        and data.nbytes <= 8 * 1024 * 1024
+        and data.nbytes <= _V2_METRIC_BATCH_BYTES
         and data.strides[1] == data.itemsize
         and data.strides[0] >= data.shape[1] * data.itemsize
         and bool(np.isfinite(data).all())
     ):
-        percentiles = np.percentile(data, [0.05, 0.5, 99.5, 99.95], axis=1)
-        # These rows are already finite. The same contiguous float64 reduction
-        # avoids nanstd's redundant sample copy and NaN-mask allocation.
-        std_uv = np.std(data, axis=1) * 1e6
-        p2p_99_uv = (percentiles[2] - percentiles[1]) * 1e6
-        p2p_999_uv = (percentiles[3] - percentiles[0]) * 1e6
-        full_p2p_uv = (np.nanmax(data, axis=1) - np.nanmin(data, axis=1)) * 1e6
-        return tuple(
-            RawChannelMetricSet(
-                channel=str(channel),
-                std_uv=float(std_uv[row_index]),
-                p2p_99_uv=float(p2p_99_uv[row_index]),
-                p2p_999_uv=float(p2p_999_uv[row_index]),
-                full_p2p_uv=float(full_p2p_uv[row_index]),
-            )
-            for row_index, channel in enumerate(channel_names)
-        )
+        percentiles = np.percentile(data, _V2_METRIC_PERCENTILES, axis=1)
+        return _finite_metric_rows(data, channel_names, percentiles)
     return tuple(
         _v2_channel_metrics(str(channel), data[row_index])
         for row_index, channel in enumerate(channel_names)
     )
+
+
+def _finite_metric_rows(
+    data: np.ndarray, channel_names: Sequence[str], percentiles: np.ndarray,
+) -> tuple[RawChannelMetricSet, ...]:
+    # These rows are already finite. The same contiguous float64 reduction
+    # avoids nanstd's redundant sample copy and NaN-mask allocation.
+    std_uv = np.std(data, axis=1) * 1e6
+    p2p_99_uv = (percentiles[2] - percentiles[1]) * 1e6
+    p2p_999_uv = (percentiles[3] - percentiles[0]) * 1e6
+    full_p2p_uv = (np.nanmax(data, axis=1) - np.nanmin(data, axis=1)) * 1e6
+    return tuple(
+        RawChannelMetricSet(
+            channel=str(channel),
+            std_uv=float(std_uv[row_index]),
+            p2p_99_uv=float(p2p_99_uv[row_index]),
+            p2p_999_uv=float(p2p_999_uv[row_index]),
+            full_p2p_uv=float(full_p2p_uv[row_index]),
+        )
+        for row_index, channel in enumerate(channel_names)
+    )
+
+
+class _OccurrenceTails:
+    """Retain only the two exact tails shared by consecutive native windows."""
+
+    def __init__(self, owned: np.ndarray, window: int) -> None:
+        self.owned = owned
+        self.window = window
+        self.half = window // 2
+        # NumPy's default linear percentile ranks, including the upper sample
+        # for an integral rank, preserve the established interpolation order.
+        ranks = (window - 1) * (np.asarray(_V2_METRIC_PERCENTILES) / 100)
+        self.lower = np.floor(ranks).astype(np.intp)
+        self.upper = self.lower + 1
+        self.fractions = ranks - self.lower
+        self.keep = int(self.upper[1] + 1)
+        self.next_offset: int | None = None
+        self.right: tuple[np.ndarray, np.ndarray] | None = None
+
+    def _tails(self, data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        scratch = data.copy(order="C")
+        scratch.partition((self.keep - 1, self.half - self.keep), axis=-1)
+        return scratch[:, :self.keep].copy(), scratch[:, -self.keep:].copy()
+
+    def score(
+        self,
+        data: np.ndarray,
+        channel_names: Sequence[str],
+        *,
+        offset: int,
+        window_kind: str,
+    ) -> tuple[RawChannelMetricSet, ...]:
+        if (
+            window_kind != "regular"
+            or offset < 0 or offset + self.window > self.owned.shape[1]
+            or data.shape[1] != self.window
+            or data.strides != self.owned.strides
+            or data.ctypes.data != self.owned.ctypes.data + offset * data.itemsize
+            or np.geterr() != _DEFAULT_NUMPY_ERRORS
+            or not bool(np.isfinite(data).all())
+        ):
+            self.right = None
+            self.next_offset = None
+            return _v2_metric_rows(data, channel_names)
+
+        first = self.right if self.next_offset == offset else None
+        if first is None:
+            first = self._tails(data[:, :self.half])
+        self.right = second = self._tails(data[:, self.half:])
+        self.next_offset = offset + self.half
+
+        # Either half may supply every extreme rank, so retain enough values
+        # from each half to cover the entire window's required rank range.
+        bottom = np.concatenate((first[0], second[0]), axis=1)
+        top = np.concatenate((first[1], second[1]), axis=1)
+        bottom.sort(axis=-1)
+        top.sort(axis=-1)
+        left = np.concatenate((bottom[:, self.lower[:2]], top[:, self.lower[2:] - self.window]), axis=1).T
+        right = np.concatenate((bottom[:, self.upper[:2]], top[:, self.upper[2:] - self.window]), axis=1).T
+        # Delegate interpolation for extreme bounds before doing any arithmetic
+        # that might produce a different NumPy warning or subnormal result.
+        magnitudes = np.abs(np.stack((left, right)))
+        if np.any(magnitudes > _OVERLAP_BOUND_MAX) or np.any(
+            (magnitudes < _OVERLAP_BOUND_MIN) & (magnitudes != 0.0)
+        ):
+            return _v2_metric_rows(data, channel_names)
+        fraction = self.fractions[:, None]
+        difference = right - left
+        percentiles = left + difference * fraction
+        np.subtract(right, difference * (1.0 - fraction), out=percentiles, where=fraction >= 0.5)
+        # Signed-zero ties may be ordered differently by the two partitions.
+        # Re-evaluate only those rows, including flat or disconnected channels.
+        uncertain = np.any((left == 0.0) | (right == 0.0), axis=0)
+        if uncertain.any():
+            percentiles[:, uncertain] = np.percentile(data[uncertain], _V2_METRIC_PERCENTILES, axis=1)
+        return _finite_metric_rows(data, channel_names, percentiles)
 
 
 def _classify_v2_metrics(
@@ -2605,12 +2696,18 @@ def evaluate_condition_raw_channel_qc_v2(
     block_duration_s: float = 10.0,
     window_hop_s: float | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    _owned_condition_data: np.ndarray | None = None,
 ) -> ConditionRawChannelQCResult:
     """Run the selected condition-window screen for preflight and review."""
     plan = resolve_pipeline_plan(settings)
     plan.validate_capabilities(resolve_recording_contract(settings))
+    # The optimized builtin can borrow one private preflight occurrence.
+    # Registered implementations still get the existing arguments.
+    builtin = _evaluate_condition_raw_channel_qc_v2
+    if _owned_condition_data is not None:
+        builtin = partial(builtin, _owned_condition_data=_owned_condition_data)
     result = plan.execute(
-        "condition_raw_screening", _evaluate_condition_raw_channel_qc_v2,
+        "condition_raw_screening", builtin,
         blocks, channel_names, settings, filename=filename, sfreq=sfreq,
         block_duration_s=block_duration_s, window_hop_s=window_hop_s,
         should_cancel=should_cancel,
@@ -2630,6 +2727,7 @@ def _evaluate_condition_raw_channel_qc_v2(
     block_duration_s: float = 10.0,
     window_hop_s: float | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    _owned_condition_data: np.ndarray | None = None,
 ) -> ConditionRawChannelQCResult:
     """Evaluate every supplied condition sample without retaining a full recording.
 
@@ -2712,6 +2810,19 @@ def _evaluate_condition_raw_channel_qc_v2(
     current_block_rows: list[RawChannelBlockMetrics] = []
     current_amplitude_window_rows: list[RawAmplitudeWindowMetrics] = []
     all_amplitude_window_rows: list[RawAmplitudeWindowMetrics] = []
+    current_tails: _OccurrenceTails | None = None
+    can_reuse_tails = (
+        np.__version__ == _OVERLAP_PERCENTILE_NUMPY_VERSION
+        and np.geterr() == _DEFAULT_NUMPY_ERRORS
+        and type(_owned_condition_data) is np.ndarray
+        and _owned_condition_data.dtype == np.float64
+        and _owned_condition_data.ndim == 2
+        and _owned_condition_data.flags.c_contiguous
+        and _owned_condition_data.shape[0] == len(source_channel_names) == len(picks) > 1
+        and _owned_condition_data.shape[1] > full_block_samples >= 4096
+        and full_block_samples == 2 * hop_samples
+        and _owned_condition_data.itemsize * len(picks) * full_block_samples <= _V2_METRIC_BATCH_BYTES
+    )
     transient_low: set[str] = set()
     transient_high: set[str] = set()
     transient_rare: set[str] = set()
@@ -2720,7 +2831,7 @@ def _evaluate_condition_raw_channel_qc_v2(
         last_window_rows: tuple[RawChannelMetricSet, ...],
         last_window_classification: _V2Classification,
     ) -> None:
-        nonlocal current_key
+        nonlocal current_key, current_tails
         if current_key is None:
             return
         aggregate_data = current_chunks[0]
@@ -2811,6 +2922,7 @@ def _evaluate_condition_raw_channel_qc_v2(
             all_amplitude_window_rows.extend(current_amplitude_window_rows)
         seen_occurrences.add(current_key)
         current_key = None
+        current_tails = None
         current_chunks.clear()
         current_window_starts.clear()
         current_block_rows.clear()
@@ -2875,6 +2987,8 @@ def _evaluate_condition_raw_channel_qc_v2(
             current_key = key
             current_start = start_sample
             current_stop = stop_sample
+            if can_reuse_tails and _owned_condition_data is not None:
+                current_tails = _OccurrenceTails(_owned_condition_data, full_block_samples)
         else:
             previous_start = current_window_starts[-1]
             expected_start = previous_start + hop_samples
@@ -2895,7 +3009,11 @@ def _evaluate_condition_raw_channel_qc_v2(
         else:
             selected = data[np.asarray(picks, dtype=int)]
         block_index = len(current_chunks)
-        block_metric_rows = _v2_metric_rows(selected, scalp_names)
+        block_metric_rows = (
+            current_tails.score(
+                selected, scalp_names, offset=start_sample - current_start, window_kind=window_kind,
+            ) if current_tails is not None else _v2_metric_rows(selected, scalp_names)
+        )
         classification = _classify_v2_metrics(block_metric_rows, config)
         if classification.baseline_warning:
             current_amplitude_window_rows.append(
