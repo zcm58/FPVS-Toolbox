@@ -334,3 +334,37 @@ def test_relaunch_timeout_retains_control_evidence_and_terminates_fixture_proces
     assert evidence["actions"] == []
     assert process.returncode == 1
     assert waits == [{"timeout": 30}]
+
+
+def test_relaunch_dismisses_reporting_disclosure_and_observes_main_window(acceptance, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    app = SimpleNamespace(pid=321)
+    process = SimpleNamespace(pid=123, returncode=0, poll=lambda: 0)
+    closed = []
+    released = []
+
+    def windows(pids):
+        if pids != {app.pid}:
+            return []
+        if not closed:
+            return [(100, "Automatic error and crash reporting")]
+        return [(101, "FPVS Toolbox")]
+
+    native = SimpleNamespace(
+        last_setup_controls={}, windows=windows, close=closed.append,
+        watch_process=lambda _pid: 789, exit_code=lambda _handle: 0, release_process=released.append,
+    )
+    monkeypatch.setattr(acceptance, "NativeWindows", lambda: native)
+    monkeypatch.setattr(acceptance.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(acceptance.psutil, "Process", lambda _pid: SimpleNamespace(children=lambda **_kwargs: []))
+    monkeypatch.setattr(acceptance, "app_processes", lambda _path: [app] if 101 not in closed else [])
+    monkeypatch.setattr(acceptance.time, "sleep", lambda _seconds: None)
+
+    result = acceptance.visible_relaunch(tmp_path / "setup.exe", tmp_path / "installed", tmp_path, {})
+
+    assert closed == [100, 101]
+    assert released == [789]
+    assert result["main_window_opened_and_closed"] is True
+    assert result["reporting_disclosure_dismissed"] is True
+    assert result["application_exit_codes"] == {321: 0}

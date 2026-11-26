@@ -350,7 +350,9 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                "/NOSHORTCUTS=1", "/RELAUNCH=1", f"/DIR={destination}", f"/LOG={evidence / 'relaunch-inno.log'}"]
     actions = []
     titles = set()
+    application_titles = set()
     launched = False
+    reporting_disclosure_dismissed = False
     watched: dict[int, int] = {}
     process = subprocess.Popen(command, env=env)
     deadline = time.monotonic() + 300
@@ -372,7 +374,13 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                     watched[app.pid] = native.watch_process(app.pid)
             windows = native.windows({app.pid for app in running})
             for hwnd, title in windows:
-                if "FPVS Toolbox" in title:
+                application_titles.add(title)
+                if title == "Automatic error and crash reporting":
+                    # Closing the first-run disclosure rejects reporting and
+                    # allows the main application window to open.
+                    reporting_disclosure_dismissed = True
+                    native.close(hwnd)
+                elif "FPVS Toolbox" in title:
                     launched = True
                     native.close(hwnd)
             if process.poll() is not None and launched and not app_processes(executable):
@@ -380,14 +388,16 @@ def visible_relaunch(installer: Path, destination: Path, evidence: Path, env: di
                     raise RuntimeError(f"Interactive relaunch installer exited {process.returncode}.")
                 return {"main_window_opened_and_closed": True, "installer_actions": actions,
                         "installer_window_titles": sorted(titles),
+                        "reporting_disclosure_dismissed": reporting_disclosure_dismissed,
                         "application_exit_codes": require_clean_app_exits(native, watched)}
             time.sleep(0.5)
         raise RuntimeError(f"Installer relaunch timed out; actions={actions}, windows={sorted(titles)}, "
-                           f"controls={native.last_setup_controls}.")
+                           f"app_windows={sorted(application_titles)}, controls={native.last_setup_controls}.")
     finally:
         try:
             (evidence / "relaunch-controls.json").write_text(
                 json.dumps({"actions": actions, "window_titles": sorted(titles),
+                            "application_window_titles": sorted(application_titles),
                             "last_setup_controls": native.last_setup_controls}, indent=2), encoding="utf-8",
             )
         finally:
