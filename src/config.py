@@ -17,7 +17,7 @@ import numpy as np
 from Main_App.updates.application import RELEASES_API_URL, RELEASES_PAGE_URL
 
 # — Version & repo —
-FPVS_TOOLBOX_VERSION: str = "3.0.0"
+FPVS_TOOLBOX_VERSION: str = "3.1.0"
 FPVS_TOOLBOX_UPDATE_API: str = RELEASES_API_URL
 FPVS_TOOLBOX_REPO_PAGE: str = RELEASES_PAGE_URL
 

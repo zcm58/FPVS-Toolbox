@@ -74,6 +74,7 @@ class _PreviewHarness(gui.LoretaVisualizerWindow):
         self._mri_drag_first_request_id = 0
         self._mri_preview_cache = None
         self._group_comparison_thread = None
+        self._comparison_figure_thread = None
         self._comparison_renderer = None
         self._mri_preview_requested_settings = None
         self._mri_preview_scalar_range = None
