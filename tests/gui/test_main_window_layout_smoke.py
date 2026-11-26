@@ -395,9 +395,9 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
         "Exit",
     ]
     assert file_actions[0] is win.actionImportFpvsConfigProject
-    assert file_actions[2] is win.actionCreateNewProject
-    assert file_actions[1] is win.actionOpenExistingProject
-    assert file_actions[6] is win.actionResetProjectProcessingCache
+    assert file_actions[4] is win.actionCreateNewProject
+    assert file_actions[3] is win.actionOpenExistingProject
+    assert file_actions[8] is win.actionResetProjectProcessingCache
     assert file_actions[-1] is win.exit_action
     assert [action.text() for action in _menu(win, "viewMenu").actions()] == ["Home", "Experiment Library…"]
 
@@ -578,7 +578,7 @@ def test_workspace_menu_keeps_native_style_and_readable_labels(
 
 
 @pytest.mark.parametrize("appearance_mode", ["Light", "Dark"])
-def test_workspace_menu_mouse_hover_is_visible_without_opening_or_triggering(
+def test_workspace_menu_mouse_hover_changes_selection_without_opening_or_triggering(
     tmp_path: Path, qtbot, monkeypatch, appearance_mode: str,
 ) -> None:
     win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode=appearance_mode)
@@ -601,29 +601,36 @@ def test_workspace_menu_mouse_hover_is_visible_without_opening_or_triggering(
     blank = QPoint(bar.width() - 12, bar.height() // 2)
     move_on_menu(blank)
     assert bar.activeAction() is None
-    idle_images = [_menu_action_image(bar, action) for action in actions]
+    # Fusion paints its selection background only while a menu is open.
+    # Windows native styles also paint the idle hover.
+    platform_style = QApplication.instance().property("fpvsPlatformMenuStyleName")
+    check_hover_pixels = str(platform_style).casefold().startswith("windows")
+    idle_images = [_menu_action_image(bar, action) for action in actions] if check_hover_pixels else []
     for index, action in enumerate(actions):
         move_on_menu(bar.actionGeometry(action).center())
         assert bar.activeAction() is action
-        assert _menu_action_image(bar, action) != idle_images[index]
-        if index:
-            assert _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1]
+        if check_hover_pixels:
+            assert _menu_action_image(bar, action) != idle_images[index]
+            if index:
+                assert _menu_action_image(bar, actions[index - 1]) == idle_images[index - 1]
         assert not any(candidate.menu().isVisible() for candidate in actions)
 
     assert triggered.count() == 0
     assert all(spy.count() == 0 for spy in opened)
     move_on_menu(blank)
     assert bar.activeAction() is None
-    assert all(
-        _menu_action_image(bar, action) == image
-        for action, image in zip(actions, idle_images)
-    )
+    if check_hover_pixels:
+        assert all(
+            _menu_action_image(bar, action) == image
+            for action, image in zip(actions, idle_images)
+        )
 
     move_on_menu(bar.actionGeometry(actions[0]).center())
-    assert _menu_action_image(bar, actions[0]) != idle_images[0]
+    assert bar.activeAction() is actions[0]
     QApplication.sendEvent(bar, QEvent(QEvent.Type.Leave))
     assert bar.activeAction() is None
-    assert _menu_action_image(bar, actions[0]) == idle_images[0]
+    if check_hover_pixels:
+        assert _menu_action_image(bar, actions[0]) == idle_images[0]
 
 
 def test_workspace_menu_popup_and_keyboard_keep_native_navigation(
