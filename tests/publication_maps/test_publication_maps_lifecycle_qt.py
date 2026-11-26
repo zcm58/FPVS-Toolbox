@@ -321,7 +321,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     tmp_path,
 ) -> None:
     host, page = _build_page(qtbot, monkeypatch, tmp_path)
-    host.resize(1280, 900)
+    host.setFixedSize(1280, 900)
     page._set_all_conditions(False)
     page.conditions_list.item(0).setCheckState(Qt.Checked)
     page.group_comparison_check.setChecked(True)
@@ -410,12 +410,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     )
     assert "Advanced Settings" not in generation_text
     page.workflow_tabs.setCurrentIndex(1)
-    qtbot.waitUntil(
-        lambda: not page.group_comparison_widget.visibleRegion().isEmpty()
-    )
-    qtbot.waitUntil(lambda: not page.input_root_edit.visibleRegion().isEmpty())
-    qtbot.waitUntil(lambda: not page.output_root_edit.visibleRegion().isEmpty())
-    for widget in (
+    advanced_controls = (
         page.input_root_edit,
         page.group_combo,
         page.refresh_btn,
@@ -423,9 +418,19 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
         page.open_output_btn,
         page.view_generation_log_btn,
         page.group_comparison_a_label,
+        page.group_comparison_b_label,
         page.group_comparison_widget,
-    ):
-        assert widget.visibleRegion().contains(widget.rect())
+    )
+
+    def assert_advanced_controls_fit() -> None:
+        assert host.size().toTuple() == (1280, 900)
+        for widget in advanced_controls:
+            name = widget.objectName() or type(widget).__name__
+            assert not widget.rect().isEmpty(), name
+            assert widget.visibleRegion().contains(widget.rect()), name
+
+    # Showing the tab can expose the containers before their nested layouts settle.
+    qtbot.waitUntil(assert_advanced_controls_fit)
 
     assert {
         card.objectName() for card in generation_page.findChildren(SectionCard)

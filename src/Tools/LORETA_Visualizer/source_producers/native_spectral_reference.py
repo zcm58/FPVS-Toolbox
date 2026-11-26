@@ -63,7 +63,16 @@ def build_native_sphere_model(method: str, *, sfreq: float = 200.0) -> NativeDia
     info.set_montage(mne.channels.make_standard_montage("standard_1020"))
     raw = mne.io.RawArray(np.zeros((10, 2)), info, verbose=False)
     raw.set_eeg_reference("average", projection=True, verbose=False)
-    sphere = mne.make_sphere_model(r0=(0., 0., 0.), head_radius=0.09, verbose=False)
+    # Use the v1 reference's Berg–Scherg fit. Running COBYLA again can change
+    # the fitted model when the SVD and dot products use a different BLAS kernel.
+    sphere = mne.make_sphere_model(r0=(0., 0., 0.), head_radius=None, verbose=False)
+    sphere["layers"] = [
+        dict(rad=0.09 * radius, rel_rad=radius, sigma=conductivity)
+        for radius, conductivity in ((0.90, 0.33), (0.92, 1.0), (0.97, 0.004), (1.0, 0.33))
+    ]
+    sphere["mu"] = np.asarray([0.9448558579286372, 0.6677791988633726, -0.29488784352102415])
+    sphere["lambda"] = np.asarray([0.41461641840826824, 2.071797048132386, -0.03074800390969433])
+    sphere["nfit"] = len(sphere["mu"])
     forward = mne.make_forward_solution(
         raw.info, trans=None, src=src, bem=sphere, meg=False, eeg=True, mindist=0., verbose=False,
     )

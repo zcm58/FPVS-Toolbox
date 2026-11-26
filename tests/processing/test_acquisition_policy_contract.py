@@ -15,6 +15,7 @@ from Main_App.processing.acquisition_policy import (
     resolve_acquisition_policy,
 )
 from Main_App.processing.preprocess import _build_preproc_fingerprint
+from Main_App.io import acquisition_metadata
 from Main_App.io.acquisition_metadata import (
     attach_recording_contract,
     configured_channel_limit,
@@ -22,6 +23,7 @@ from Main_App.io.acquisition_metadata import (
     source_identity,
     source_load_kwargs,
 )
+from Main_App.io.eeg_geometry import BIOSEMI64_COORDINATE_FINGERPRINT, BIOSEMI64_GEOMETRY_VERSION
 from Main_App.io.recording_contract import RecordingContract
 
 
@@ -43,9 +45,20 @@ from Main_App.io.recording_contract import RecordingContract
         ),
     ],
 )
-def test_pre_bids_scientific_fingerprints_are_unchanged(settings, expected):
-    # Captured independently from the pre-refactor da14edaa implementation.
+def test_pre_bids_scientific_fingerprints_are_unchanged(settings, expected, monkeypatch):
+    # The da14edaa golden bytes used this BioSemi64 geometry digest. Native MNE
+    # head coordinates can differ in their last bits across numerical runtimes.
+    monkeypatch.setattr(
+        acquisition_metadata,
+        "BIOSEMI64_COORDINATE_FINGERPRINT",
+        "sha256:5c2ccd43cfa6922ede07b26d262212da4d6a7fc85cb92485b377ce2432361f06",
+    )
     assert hashlib.sha256(_build_preproc_fingerprint(settings).encode()).hexdigest() == expected
+
+
+def test_biosemi_fingerprint_includes_native_geometry_digest():
+    geometry = f"geometry={BIOSEMI64_GEOMETRY_VERSION},{BIOSEMI64_COORDINATE_FINGERPRINT}"
+    assert geometry in _build_preproc_fingerprint({}).split("|")
 
 
 def test_normalized_policy_keeps_recorded_channel_order_and_marker_edges():
