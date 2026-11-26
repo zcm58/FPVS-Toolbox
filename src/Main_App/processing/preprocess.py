@@ -1758,6 +1758,9 @@ def perform_preprocessing(
             )
 
         checkpoint = checkpoint_identity(raw, params, fingerprint_in)
+        capture_input_digest = params.get("_fpvs_capture_kurtosis_input_digest")
+        if checkpoint is not None and callable(capture_input_digest):
+            capture_input_digest(checkpoint.samples_sha256)
         checkpoint_cancel = params.get("_fpvs_kurtosis_checkpoint_should_cancel")
         cached = None
         if checkpoint is not None:

@@ -49,6 +49,7 @@ from Main_App.processing.kurtosis_qc import (
 )
 from Main_App.processing.preprocess import prepare_kurtosis_review_evidence
 from Main_App.processing.raw_channel_qc import evaluate_raw_channel_qc
+from Main_App.processing.raw_channel_qc_reuse import PreparedRawChannelQC, raw_channel_qc_inputs
 from Main_App.processing.removed_electrode_detection import (
     REMOVED_ELECTRODE_DETECTION_MODE_AUTO,
     manual_removed_electrodes_for_recording,
@@ -209,6 +210,7 @@ class KurtosisReviewFileResult:
     skip_reason: str | None = None
     review_diagnostics: Mapping[str, object] = field(default_factory=dict)
     source_identity: Mapping[str, object] = field(default_factory=dict)
+    prepared_raw_qc: PreparedRawChannelQC | None = field(default=None, repr=False, compare=False)
 
     @property
     def review_required_channels(self) -> tuple[str, ...]:
@@ -242,6 +244,15 @@ class KurtosisReviewScan:
     @property
     def errors(self) -> tuple[KurtosisReviewFileResult, ...]:
         return tuple(result for result in self.results if result.status == KURTOSIS_REVIEW_FILE_STATUS_ERROR)
+
+    @property
+    def prepared_raw_qc_by_file(self) -> dict[str, PreparedRawChannelQC]:
+        if self.cancelled or self.errors:
+            return {}
+        return {
+            result.prepared_raw_qc.source_path: result.prepared_raw_qc
+            for result in self.results if result.prepared_raw_qc is not None
+        }
 
     @property
     def can_continue(self) -> bool:
@@ -1447,6 +1458,7 @@ def _scan_kurtosis_review_serial(
                 settings.get("removed_electrode_detection_mode"),
                 auto_detect_removed_electrodes=settings.get("auto_detect_removed_electrodes", False),
             )
+            raw_qc_input_identity = None
             if detector_mode == REMOVED_ELECTRODE_DETECTION_MODE_AUTO:
                 # Final processing marks these current, directly authorized
                 # raw-QC bads before initial referencing. Recompute them here
@@ -1456,11 +1468,12 @@ def _scan_kurtosis_review_serial(
                 raw_qc_started = perf_counter()
                 if progress:
                     progress(f"Checking removed electrodes in {path.name}", index - 1, total)
+                source_qc_spans = relative_spans_from_plan(restricted_plan)
                 raw_qc_result = evaluate_raw_channel_qc(
                     raw,
                     file_settings,
                     filename=path.name,
-                    analysis_spans=relative_spans_from_plan(restricted_plan),
+                    analysis_spans=source_qc_spans,
                 )
                 _log_scan_timing(path, "automatic_raw_channel_qc", raw_qc_started)
                 if raw_qc_result.excluded:
@@ -1475,6 +1488,7 @@ def _scan_kurtosis_review_serial(
                         progress(f"Skipped {path.name}: raw channel QC excluded the recording", index, total)
                     continue
                 direct_bad_channels = tuple(raw_qc_result.channels_to_interpolate)
+                raw_qc_input_identity = raw_channel_qc_inputs(raw, file_settings, source_qc_spans)
             if progress:
                 progress(f"Preprocessing {path.name} for kurtosis review", index - 1, total)
             review_diagnostics = {}
@@ -1524,6 +1538,9 @@ def _scan_kurtosis_review_serial(
                         "evaluation_scope": "all_analyzed_occurrences", "localized_events": [],
                     }
                 _log_scan_timing(path, "raw_review_diagnostics", diagnostics_started)
+            input_digests: list[str] = []
+            if raw_qc_input_identity is not None:
+                file_settings["_fpvs_capture_kurtosis_input_digest"] = input_digests.append
             prepare_started = perf_counter()
             prepared = prepare_kurtosis_review_evidence(
                 raw,
@@ -1547,6 +1564,18 @@ def _scan_kurtosis_review_serial(
                 post_load_identity = source_content_identity(path, should_cancel=should_cancel)
             if post_load_identity != review_source_identity:
                 raise KurtosisReviewScanError("Recording changed while QC evidence was prepared. Run QC again.")
+            prepared_raw_qc = None
+            if raw_qc_input_identity is not None:
+                samples_sha256 = input_digests[0] if input_digests else ""
+                if not samples_sha256 and diagnostic_cache_key is not None:
+                    samples_sha256 = diagnostic_cache_key.inputs["event_plan"]["converted_samples_sha256"]
+                if isinstance(samples_sha256, str) and samples_sha256:
+                    prepared_raw_qc = PreparedRawChannelQC(
+                        inputs=raw_qc_input_identity, source_path=review_source_identity["path"],
+                        source_size=review_source_identity["size_bytes"],
+                        source_sha256=review_source_identity["sha256"],
+                        samples_sha256=samples_sha256, result=raw_qc_result,
+                    )
             if diagnostic_cache_key is not None and not diagnostic_cache_hit:
                 save_raw_diagnostics(diagnostic_cache_key, review_diagnostics, should_cancel=should_cancel)
             review_diagnostics = {**review_diagnostics, "source_identity": review_source_identity} if review_diagnostics else {}
@@ -1602,6 +1631,7 @@ def _scan_kurtosis_review_serial(
                     decision_plan=dict(decision_plan),
                     review_diagnostics=review_diagnostics,
                     source_identity=review_source_identity,
+                    prepared_raw_qc=prepared_raw_qc,
                 )
             )
         except Exception as exc:

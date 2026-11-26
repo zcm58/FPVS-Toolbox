@@ -1148,6 +1148,9 @@ Kurtosis review and interpolation:
   damaged/incomplete entry falls back to the ordinary calculation. One latest
   complete checkpoint is retained per source recording.
   Failed reference/filter/resampling preparation never publishes a checkpoint.
+  Archive SHA-256 is computed as its uncompressed NumPy ZIP bytes are written.
+  The write still flushes and syncs the archive and atomically publishes its
+  manifest. Readers authenticate both historical and new archives.
 - Reuse is bound to the source file and actual input sample hashes, source
   metadata/annotations, full analyzed-span plan, channel selection/direct bads,
   reference/filter/notch/resampling inputs, and numerical-library/method versions.
@@ -1167,6 +1170,15 @@ Kurtosis review and interpolation:
   numerical policy, original source bytes and loaded sample bytes. Other BIDS
   fields retain their exact identity, including unknown fields. An older
   checkpoint whose key included the import timings rebuilds once on use.
+- In the same processing run, QC preparation can pass the built-in automatic
+  raw-channel result for the reviewed interval union to the recording worker.
+  This transient evidence uses the decoded sample SHA-256 already established
+  by preparation or raw diagnostic identity. After reopening the source, the
+  recording worker checks current source and loaded samples, validated geometry,
+  reviewed spans, electrode settings, and the native numerical policy. If any
+  check fails or the receipt is unavailable, it runs the ordinary detector.
+  The handoff stays outside project persistence and scientific fingerprints.
+  Preflight's condition-level findings keep their review-only authority.
 - Kurtosis runs only when `reject_thresh` is truthy.
 - EEG picks exclude existing bads and exclude the stim channel when the stim
   channel exists and is not typed as EEG.

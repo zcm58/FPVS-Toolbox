@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+from io import UnsupportedOperation
 import json
 import logging
 import math
@@ -75,6 +76,7 @@ class CheckpointIdentity:
     source_sha256: str = ""
     bids_import_diagnostics: _BidsImportDiagnostics | None = field(default=None, compare=False, repr=False)
     temporary_bids_attributes: dict | None = field(default=None, compare=False, repr=False)
+    samples_sha256: str = field(default="", compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -220,7 +222,7 @@ def checkpoint_identity(raw, params: dict, preprocessing_fingerprint: str) -> Ch
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
         return CheckpointIdentity(
             root, folder, source, before, hashlib.sha256(encoded).hexdigest(), digest,
-            diagnostics, temporary_bids_attributes,
+            diagnostics, temporary_bids_attributes, identity["current_samples_sha256"],
         )
     except (OSError, ValueError, TypeError, RuntimeError):
         logger.debug("prepared_kurtosis_cache_identity_unavailable", exc_info=True)
@@ -329,6 +331,33 @@ def load_checkpoint(identity: CheckpointIdentity | None, *, should_cancel=None,
         return None
 
 
+class _CheckpointArchiveWriter:
+    """Hash the final ZIP bytes as they are written in order."""
+
+    def __init__(self, stream: BinaryIO):
+        self._stream = stream
+        self._digest = hashlib.sha256()
+
+    def write(self, data: bytes | bytearray | memoryview) -> int:
+        block = memoryview(data)
+        written = self._stream.write(block)
+        if written != block.nbytes:
+            raise OSError("Incomplete checkpoint archive write.")
+        self._digest.update(block)
+        return written
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def read(self, _size: int = -1) -> bytes:
+        # NumPy recognizes a file-like object by its read method. Without
+        # seek/tell, ZIP appends data descriptors instead of rewriting headers.
+        raise UnsupportedOperation("Checkpoint archive writer is write-only.")
+
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
+
+
 def save_checkpoint(identity: CheckpointIdentity | None, raw, params: dict, evidence: KurtosisQCEvidence, original_sfreq: float) -> bool:
     if identity is None:
         return False
@@ -352,13 +381,13 @@ def save_checkpoint(identity: CheckpointIdentity | None, raw, params: dict, evid
             "evidence_fingerprint": evidence.fingerprint, "state": state,
         }, separators=(",", ":"), allow_nan=False))
         identity.folder.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w+b", dir=identity.folder, prefix=".pending-", suffix=".tmp", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=identity.folder, prefix=".pending-", suffix=".tmp", delete=False) as stream:
             temporary = Path(stream.name)
-            np.savez(stream, **arrays)
+            writer = _CheckpointArchiveWriter(stream)
+            np.savez(writer, **arrays)
             stream.flush()
             os.fsync(stream.fileno())
-            stream.seek(0)
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            digest = writer.hexdigest()
         name = f"{identity.key}.{digest[:20]}.npz"
         target = identity.folder / name
         if not _contained(identity) or _cancelled(params):

@@ -13,6 +13,7 @@ from typing import Any
 
 PIPELINE_SETTINGS_KEY = "processing_pipeline"
 PIPELINE_SCHEMA_VERSION = "1.0"
+PREPARED_RAW_QC_BY_FILE = "_fpvs_prepared_raw_qc_by_file"
 RECORDING_CACHE_SETTING_KEYS = (
     "enable_bids_import_cache",
     "enable_kurtosis_checkpoint_cache",
@@ -211,6 +212,7 @@ def pipeline_fingerprint_payload(settings: Mapping[str, Any] | None = None) -> d
 def fingerprint_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(settings)
     result.pop(PIPELINE_SETTINGS_KEY, None)
+    result.pop(PREPARED_RAW_QC_BY_FILE, None)
     for key in RECORDING_CACHE_SETTING_KEYS:
         result.pop(key, None)
     result.update(pipeline_fingerprint_payload(settings))

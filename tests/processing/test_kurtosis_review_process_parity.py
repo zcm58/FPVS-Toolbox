@@ -172,11 +172,11 @@ def _prepare_native_policy_probe(source, native_threads):
         raw.close()
 
 
-def _small_bdf(path, onset=1, oddball=55):
+def _small_bdf(path, onset=1, oddball=55, *, eeg_scale=1.0):
     labels = ("EXG1", "EXG2", *BIOSEMI64_CHANNELS, "Status")
     sample_count = 1000
     header_bytes = _write_sampling_bdf(path, labels=labels, samples=(sample_count,) * len(labels), duration="10")
-    values = np.random.default_rng(77191).normal(scale=1.0, size=(len(labels), sample_count))
+    values = np.random.default_rng(77191).normal(scale=eeg_scale, size=(len(labels), sample_count))
     values[2] *= .02
     values[2, ::50] = 500.0
     values[-1] = 0.0
@@ -345,3 +345,47 @@ def test_native_policy_characterization_preserves_grid_and_bounds_numeric_drift(
     assert all(native["num_threads"] == 1 for native in worker["pools"])
     assert all(native["num_threads"] == 24 for native in parent_policy["pools"])
     assert threadpool_info() == parent_pools
+
+
+
+@pytest.mark.parametrize("enable_checkpoint", [False, True])
+def test_spawned_review_returns_native_raw_qc_handoff(tmp_path, enable_checkpoint):
+    from Main_App.workers.processing_resource_budget import plain_metadata_bytes
+
+    path = tmp_path / "P001.bdf"
+    events = _small_bdf(path, eeg_scale=25.0)
+    info = SimpleNamespace(path=path, subject_id="P001", recording_id="P001_session-1",
+                           session_id="session-1", session_label="Visit 1", visit_index=1)
+    protocol = FrequencyProtocol.from_recurrence(
+        10, 5, expected_analyzed_oddball_cycles=10,
+        expected_analyzed_oddball_cycles_source=EXPECTED_CYCLES_SOURCE_MANUAL,
+    )
+    event_map = {"Condition": 1}
+    plans = {str(path): plan_preflight_qc_events(
+        events=events, event_map=event_map, sfreq=100.0, n_times=1000,
+        first_samp=0, frequency_protocol=protocol,
+    ).to_payload()}
+    settings = _params(path)
+    settings.update(
+        frequency_protocol=protocol, high_pass=1.0, low_pass=30.0, downsample_rate=80.0,
+        project_root=str(tmp_path), enable_kurtosis_checkpoint_cache=enable_checkpoint,
+        removed_electrode_detection_mode="auto",
+    )
+    context = get_context("spawn")
+    queue = context.Queue()
+    try:
+        with ProcessPoolExecutor(
+            max_workers=1, mp_context=context, initializer=_initialize_review_probe,
+            initargs=(context.Event(), queue),
+        ) as pool:
+            review = pool.submit(_run_review_probe, info, settings, event_map, plans).result(timeout=60)["result"]
+    finally:
+        queue.close()
+        queue.join_thread()
+    assert not review.errors
+    receipt = review.prepared_raw_qc_by_file[str(path.resolve())]
+    assert receipt.source_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert len(receipt.samples_sha256) == 64
+    assert receipt.result.scoring_scope == "approved_analyzed_interval_union"
+    assert not receipt.result.excluded
+    assert plain_metadata_bytes(receipt) < 1024**2

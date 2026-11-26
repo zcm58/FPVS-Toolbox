@@ -36,6 +36,7 @@ from Main_App.io.buffered_fif import save_raw_fif
 from Main_App.io.safe_file import regular_file_info
 from Main_App.processing.preflight_qc_pruning import safe_cache_directory
 from Main_App.processing.pipeline_plan import (
+    PREPARED_RAW_QC_BY_FILE,
     PipelineCancelled,
     PipelineExecutionError,
     pipeline_fingerprint_payload,
@@ -107,6 +108,7 @@ from Main_App.processing.raw_channel_qc import (
     RAW_CHANNEL_QC_METHOD_VERSION,
     evaluate_raw_channel_qc,
 )
+from Main_App.processing.raw_channel_qc_reuse import restore_raw_channel_qc
 from Main_App.processing.preprocessed_cache_info import (
     restore_preprocessed_filter_info,
     snapshot_preprocessed_filter_info,
@@ -447,6 +449,11 @@ def _recording_job_settings(file_path: Path, settings: Dict[str, object]) -> Dic
                 matched[key] = value
                 break
         local["kurtosis_review_decisions_by_recording"] = matched
+    prepared_raw_qc = local.pop(PREPARED_RAW_QC_BY_FILE, None)
+    if isinstance(prepared_raw_qc, Mapping):
+        path = str(file_path.resolve())
+        if path in prepared_raw_qc:
+            local[PREPARED_RAW_QC_BY_FILE] = {path: prepared_raw_qc[path]}
     return local
 
 
@@ -1679,6 +1686,7 @@ def _run_full_pipeline_for_file(
     export_receipts: List[Dict[str, object]] = []
     cache_status = "not_checked"
     settings = _settings_for_file(file_path, settings)
+    prepared_raw_qc_by_file = settings.pop(PREPARED_RAW_QC_BY_FILE, None)
     settings["project_root"] = str(project_root)
     source_schema = None
 
@@ -2024,12 +2032,18 @@ def _run_full_pipeline_for_file(
             settings["_fpvs_manual_removed_electrodes"] = (
                 _manual_removed_electrodes_for_file(file_path, settings)
             )
-            raw_qc_result = evaluate_raw_channel_qc(
-                raw,
-                settings,
-                filename=file_path.name,
-                analysis_spans=source_qc_spans,
-            )
+            raw_qc_result = None
+            if isinstance(prepared_raw_qc_by_file, Mapping):
+                raw_qc_result = restore_raw_channel_qc(
+                    prepared_raw_qc_by_file.get(str(file_path.resolve())),
+                    raw, settings, file_path, source_qc_spans,
+                )
+            if raw_qc_result is None:
+                raw_qc_result = evaluate_raw_channel_qc(
+                    raw, settings, filename=file_path.name, analysis_spans=source_qc_spans,
+                )
+            else:
+                crop_logger.info("prepared_raw_channel_qc_reused file=%s", file_path.name)
             if raw_qc_result.excluded:
                 logger.warning(
                     "raw_channel_qc_excluded file=%s reason=%s n_bad=%d n_channels=%d "

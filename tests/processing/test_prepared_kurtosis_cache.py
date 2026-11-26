@@ -1,7 +1,7 @@
 """Exact prepared checkpoints reuse computation, never review authority."""
 
 from copy import deepcopy
-from dataclasses import dataclass, FrozenInstanceError
+from dataclasses import asdict, dataclass, FrozenInstanceError
 from datetime import datetime, timezone
 import json
 import hashlib
@@ -239,6 +239,51 @@ def test_prepared_checkpoint_exact_filtered_signal_events_evidence_and_metadata(
     warm._data[:] = 0.
     again = cache.load_checkpoint(_identity(raw, params))
     assert prepared.raw._data.tobytes() == again.raw._data.tobytes()
+
+
+def test_streamed_checkpoint_checksum_and_bounded_preview_match_legacy_archive(recording, monkeypatch):
+    from Main_App.processing.qc_signal_view import QcSignalViewRequest, load_qc_signal_view
+
+    raw, params, source = recording
+    file_digest = hashlib.file_digest
+
+    def reject_archive_reread(stream, algorithm):
+        assert not str(stream.name).endswith(".tmp")
+        return file_digest(stream, algorithm)
+
+    with monkeypatch.context() as during_write:
+        during_write.setattr(hashlib, "file_digest", reject_archive_reread)
+        scanned = preprocess.prepare_kurtosis_review_evidence(raw, params, lambda *_: None)
+
+    descriptor = scanned["signal_preview"]["signal_view"]["prepared"]
+    identity = _identity(raw, params)
+    archive = identity.folder / (identity.key + "." + descriptor["sha256"][:20] + ".npz")
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == descriptor["sha256"]
+    with np.load(archive, allow_pickle=False) as streamed:
+        legacy_archive = identity.folder / "legacy-format.npz"
+        np.savez(legacy_archive, **dict(streamed))
+
+    legacy_digest = hashlib.sha256(legacy_archive.read_bytes()).hexdigest()
+    legacy_path = legacy_archive.rename(identity.folder / f"{identity.key}.{legacy_digest[:20]}.npz")
+    legacy_descriptor = {**descriptor, "path": str(legacy_path), "sha256": legacy_digest}
+    view_params = {"channel": descriptor["channels"][0], "mode": "prepared"}
+    new = load_qc_signal_view(QcSignalViewRequest(source, source.parent, params, prepared=descriptor, **view_params))
+    old = load_qc_signal_view(QcSignalViewRequest(source, source.parent, params, prepared=legacy_descriptor, **view_params))
+    assert new.verified_checkpoint and old.verified_checkpoint
+    new_state, old_state = asdict(new), asdict(old)
+    for state in (new_state, old_state):
+        del state["verified_checkpoint"], state["overview_cache"]
+    _assert_exact_state(new_state, old_state)
+
+    current = cache.load_checkpoint(identity)
+    pointer = identity.folder / "latest.json"
+    legacy_manifest = {**json.loads(pointer.read_text(encoding="utf-8")), "path": legacy_path.name,
+                       "sha256": legacy_digest, "size_bytes": legacy_path.stat().st_size}
+    pointer.write_text(json.dumps(legacy_manifest), encoding="utf-8")
+    legacy = cache.load_checkpoint(identity)
+    assert legacy.raw._data.tobytes() == current.raw._data.tobytes()
+    _assert_exact_state((legacy.evidence, legacy.params, raw_state(legacy.raw)),
+                        (current.evidence, current.params, raw_state(current.raw)))
 
 
 def test_restored_preview_size_preserves_invalid_and_out_of_bounds_span_handling(recording):

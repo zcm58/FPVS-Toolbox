@@ -11,7 +11,7 @@ No waveform, scientific decision, or cross-run geometry cache is retained.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from fractions import Fraction
 import math
 from pathlib import Path
@@ -73,6 +73,8 @@ def plain_metadata_bytes(value: object) -> int:
     copies. The caller additionally reserves multiple concurrent native copies.
     Limits describe the supported estimator domain, not a native data limit.
     """
+    from Main_App.processing.raw_channel_qc import RawChannelQCConfig, RawChannelQCResult
+    from Main_App.processing.raw_channel_qc_reuse import PreparedRawChannelQC, RawChannelQCInputs
     from Main_App.projects import FrequencyProtocol
 
     ancestors: set[int] = set()
@@ -102,6 +104,9 @@ def plain_metadata_bytes(value: object) -> int:
         if type(item) is FrequencyProtocol:
             return visit(item.to_manifest(), depth + 1)
         if type(item) not in (dict, list, tuple, set, frozenset):
+            if type(item) in (PreparedRawChannelQC, RawChannelQCInputs, RawChannelQCConfig, RawChannelQCResult):
+                payload = tuple(getattr(item, field.name) for field in fields(item))
+                return 512 + visit(payload, depth + 1)
             raise ValueError("Custom processing metadata needs native scheduling.")
         identity = id(item)
         if identity in ancestors:

@@ -10,6 +10,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from Main_App import gui
+from Main_App.processing.pipeline_plan import PREPARED_RAW_QC_BY_FILE
 from Main_App.processing.preflight_qc import PreflightQcScan
 from Main_App.processing.processing_ledger import additional_preflight_infos_for_chosen_scope
 
@@ -32,6 +33,7 @@ def _native_functions(monkeypatch):
     module.Mapping = Mapping
     module.Sequence = Sequence
     module.PreflightQcScan = PreflightQcScan
+    module.PREPARED_RAW_QC_BY_FILE = PREPARED_RAW_QC_BY_FILE
     module.additional_preflight_infos_for_chosen_scope = additional_preflight_infos_for_chosen_scope
     module.logging = logging
     module.QObject = object
@@ -75,6 +77,7 @@ def test_additional_crop_review_restores_global_events_and_keeps_all_current_vot
             "P66": {}, **{str(info.path): {} for info in infos[66:69]},
         },
         "_fpvs_preflight_recording_not_started_files": [str(infos[69].path)],
+        PREPARED_RAW_QC_BY_FILE: {str(infos[65].path): object()},
     }
     source_map = {"Faces": 22}
     host = SimpleNamespace(
@@ -88,6 +91,7 @@ def test_additional_crop_review_restores_global_events_and_keeps_all_current_vot
 
     def start_raw_review(values):
         assert settings["event_id_map"] == source_map
+        assert PREPARED_RAW_QC_BY_FILE not in settings
         settings["observed_review_edit"] = True
         captured.extend(info.subject_id for info in values)
         raise ReachedRawReview

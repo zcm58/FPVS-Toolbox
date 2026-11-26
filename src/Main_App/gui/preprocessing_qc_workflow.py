@@ -65,6 +65,7 @@ from Main_App.processing.preflight_qc import (
     scan_preprocessing_qc,
     scan_recording_not_started_files,
 )
+from Main_App.processing.pipeline_plan import PREPARED_RAW_QC_BY_FILE
 from Main_App.processing.qc_source_prefetch import QcSourcePrefetch
 from Main_App.processing.kurtosis_review_scan import (
     KurtosisReviewProgress,
@@ -4665,6 +4666,7 @@ def run_preprocessing_qc_workflow(
     # Every selected source is checked via the same guarded caches. A previous
     # technical exclusion cannot mask a recording that has since gained data.
     params.pop("_fpvs_preflight_event_plans_by_file", None)
+    params.pop(PREPARED_RAW_QC_BY_FILE, None)
     group_labels = _project_group_labels(host)
 
     _show_data_quality_notice(
@@ -4813,6 +4815,9 @@ def run_preprocessing_qc_workflow(
             reviewed_files=raw_file_infos,
         ):
             return False
+        prepared_raw_qc = kurtosis_scan.prepared_raw_qc_by_file
+        if prepared_raw_qc:
+            params[PREPARED_RAW_QC_BY_FILE] = prepared_raw_qc
         return True
     finally:
         _finish_qc_source_prefetch(host, prefetch)

@@ -20,7 +20,8 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
     module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), refresh_helper, workflow], type_ignores=[])
     trace = []
     refreshed_exclusions = []
-    scan = SimpleNamespace(cancelled=False)
+    receipt = object()
+    scan = SimpleNamespace(cancelled=False, prepared_raw_qc_by_file={str(tmp_path / 'source.bdf'): receipt})
 
     def refresh_exclusions(values):
         refreshed_exclusions.append(tuple(values or ()))
@@ -29,7 +30,8 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
     prefetch = SimpleNamespace(source_prefetch=SimpleNamespace(
         update_participant_exclusions=refresh_exclusions,
     ))
-    params = {"event_id_map": {"Faces": 1}, "reject_thresh": 5}
+    handoff_key = "_fpvs_prepared_raw_qc_by_file"
+    params = {"event_id_map": {"Faces": 1}, "reject_thresh": 5, handoff_key: {"old": object()}}
     infos = [SimpleNamespace(path=tmp_path / "source.bdf")]
 
     def initial_scan(*_args, **_kwargs):
@@ -79,7 +81,7 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
 
     namespace = {
         "Mapping": dict, "Sequence": (list, tuple), "Path": Path,
-        "_DATA_QUALITY_SCAN_WAIT_MESSAGE": "Scanning",
+        "_DATA_QUALITY_SCAN_WAIT_MESSAGE": "Scanning", "PREPARED_RAW_QC_BY_FILE": handoff_key,
         "_project_group_labels": lambda *_a: {},
         "_show_data_quality_notice": lambda *_a: None,
         "_begin_preflight_page": lambda *_a, **_k: None,
@@ -107,6 +109,7 @@ def test_prefetch_starts_with_step_two_and_finishes_on_every_review_exit(tmp_pat
             namespace["run_preprocessing_qc_workflow"](object(), infos, params)
     else:
         assert namespace["run_preprocessing_qc_workflow"](object(), infos, params) is (stop is None)
+    assert params.get(handoff_key) == (scan.prepared_raw_qc_by_file if stop is None else None)
     assert [entry for entry in trace if entry != "refresh"][:3] == ["scan", "prefetch", "markers"]
     assert trace[-1] == "finish"
     assert trace.count("prefetch") == trace.count("finish") == 1
