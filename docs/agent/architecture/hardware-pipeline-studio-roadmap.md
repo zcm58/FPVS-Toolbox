@@ -28,7 +28,8 @@ Interpret the diagram as a future architecture and UX reference:
 
 - Native hardware/file adapters feed the shared MNE processing boundary through
   the BIDS import layer. ActiveTwo, ActiveThree, Brain Products, and Unicorn have the scoped routes below;
-  EGI and NeuroScan in this diagram are target families, not enabled support.
+  EGI and NeuroScan EEG processing remain future work. Toolbox can already
+  [inspect EGI MFF event markers](eeg-loading-contract.md#egi-din-marker-verification).
   The documented lossless BVRF derivative exception still applies.
 - Each project's users choose supported modules, methods, and parameters for
   referencing, montage handling, resampling, filtering, bad-channel detection

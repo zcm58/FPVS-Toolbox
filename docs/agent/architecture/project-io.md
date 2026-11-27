@@ -321,6 +321,9 @@ and snapshot revisions, successful finalization, matching project/session/
 execution/participant identity and ordered run/condition identity. This
 transport-neutral identity check is separate from the Unicorn code-order adapter.
 
+For a Studio EGI DIN run, compare the per-run schedule and trigger log with the
+selected Net Station MFF event track using the [read-only marker diagnostic](eeg-loading-contract.md#egi-din-marker-verification).
+
 Studio's requested base/oddball rates are the initial Toolbox protocol and FFT
 targets. The source display settings are retained separately. A configured
 refresh yields an estimated frame schedule. For a completed run with an identified

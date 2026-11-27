@@ -1,5 +1,49 @@
 # EEG Loading and BIDS Import Contract
 
+## EGI DIN marker verification
+
+Use the read-only source diagnostic for a continuous Net Station MFF and one
+explicit event track. This route inspects event records. MFF remains outside
+the raw project registration, montage, BIDS and EEG processing routes.
+The Studio counterpart is `docs/exec-plans/active/egi-din-markers.md` in
+`FPVS-Studio-2.0`, on the paired `codex/egi-din-markers` branch.
+
+From the Toolbox source checkout on Windows, list the event-track filenames and
+inspect one. Substitute the filename from your MFF and the paths you reviewed.
+
+```powershell
+$env:PYTHONPATH = 'src'
+Get-ChildItem -LiteralPath 'C:/study/run.mff' -Filter 'Events_*.xml' -Name
+.\.venv\Scripts\python.exe -m Main_App.io.verify_egi_din 'C:/study/run.mff' --track 'Events_255 DINs.xml'
+```
+
+In Studio, enable detailed run folders before recording. For a single condition
+run, select the matching Studio directory containing
+`runspec.json` and the per-run `trigger_log.csv`. Record the association and
+the bench-verified translation from the track's exact source codes to sent
+bytes. The names below are illustrative. DIN numbers can identify individual
+input lines depending on the Net Station setup. A multi-line word requires a
+qualified word-output configuration; do not infer a byte by parsing a suffix
+or combining simultaneous records.
+
+```powershell
+.\.venv\Scripts\python.exe -m Main_App.io.verify_egi_din 'C:/study/run.mff' --track 'Events_255 DINs.xml' --map 'STRT=7' --map 'ODDB=55' --studio-run 'C:/study/studio-run'
+```
+
+The JSON report retains the original track rows, including unmapped events,
+and identifies the selected run, condition and compiled marker roles. The
+comparison uses the entire selected track in file order, including repeated
+codes and ties. Extra events (including unrelated events in that track),
+missing events, disabled or failed sends, and mismatched codes prevent a match.
+Use a dedicated run/track for this first pass. The exit status is 0 for a
+successful inspection or ordered match, 1 for a mismatch, and 2 for an input
+error. For an ordered match, each aligned row shows the display frame, Studio
+callback time and recorded sample. `mff_minus_studio_elapsed_ms` compares the
+elapsed times on the two clocks relative to their first matched event. A
+positive value means that more time elapsed in the recording. This comparison
+cannot detect a constant delay. Measure display latency against a separately
+identifiable photodiode trace on the same recording clock.
+
 ## Shared import boundary
 
 `Main_App.io.bids_import` owns preparation and verified reuse of one recording's
