@@ -636,6 +636,11 @@ def _set_label(host: Any, attr_name: str, text: str) -> None:
     label = getattr(host, attr_name, None)
     if label is not None:
         label.setText(text)
+        if attr_name == "processing_summary_label":
+            intro = getattr(host, "processing_message_label", None)
+            panel = getattr(host, "processing_instruction_panel", None)
+            if intro is not None and panel is not None:
+                panel.setVisible(bool(text) and text != intro.text())
 
 
 def _set_amplitude_help_label(host: Any, attr_name: str, prefix: str = "") -> None:
@@ -724,6 +729,14 @@ def _set_data_quality_sections(
     live_heading: str,
     checklist: Sequence[str],
 ) -> None:
+    # Normal processing uses the same page and hides these QC-only details.
+    for name in (
+        "processing_overview_row", "processing_status_separator",
+        "processing_live_heading_label", "processing_current_file_label",
+    ):
+        widget = getattr(host, name, None)
+        if widget is not None:
+            widget.setVisible(True)
     _set_label(host, "processing_summary_heading_label", summary_heading)
     _set_label(host, "processing_live_heading_label", live_heading)
     _set_label(host, "processing_progress_heading_label", "Progress")

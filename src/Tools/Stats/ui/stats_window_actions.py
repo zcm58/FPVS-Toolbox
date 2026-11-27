@@ -805,6 +805,7 @@ class StatsWindowActionsMixin:
         )
         dialog.exec()
         path = dialog.last_result_path
+        dialog.deleteLater()
         if path is not None:
             self._set_last_export_path(str(path))
             self._set_status(f"Repeated-session analysis workbook: {path}")

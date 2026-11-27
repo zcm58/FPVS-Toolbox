@@ -366,9 +366,10 @@ def format_preliminary_workbook_coverage(
                 )
             )
         )
+    n_participants = len(coverage.participants)
+    n_conditions = len(coverage.selected_conditions)
     return (
-        "Preliminary workbook coverage (before QC/manual exclusions): all "
-        f"{len(coverage.selected_conditions)} selected conditions are supplied "
-        f"by all {len(coverage.participants)} scanned participants. This preview "
-        "does not remove participants."
+        "All selected workbooks are present before QC and manual exclusions "
+        f"({n_participants} participant{'s' if n_participants != 1 else ''}, "
+        f"{n_conditions} condition{'s' if n_conditions != 1 else ''})."
     )

@@ -177,6 +177,7 @@ SOURCE_OPTIONS_ACTION_CANCEL_BUILD = "cancel_build"
 EXPORT_FIGURES_ACTION_SPLIT_FIGURES = "split_figures"
 EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES = "stacked_split_figures"
 EXPORT_FIGURES_ACTION_MRI_SLICES = "mri_slices"
+EXPORT_FIGURES_ACTION_COMPARISON = "comparison"
 ZSCORE_DISPLAY_THRESHOLD_CUSTOM_ID = "custom"
 ZSCORE_DISPLAY_THRESHOLD_PRESETS: tuple[tuple[str, float], ...] = (
     ("z >= 1.64", 1.64),
@@ -2266,9 +2267,6 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_source_map_selectors_enabled()
         self.display_mode_combo.setEnabled(enabled)
         self.reset_camera_btn.setEnabled(enabled)
-        self.export_figures_btn.setEnabled(enabled and getattr(self, "_comparison_figure_thread", None) is None and (
-            not getattr(self, "_group_comparison_enabled", False) or bool(getattr(self, "_descriptive_payloads", ()))
-        ))
         self.source_options_btn.setEnabled(enabled)
         self._sync_activation_render_mode_controls()
         self._sync_cluster_mask_control()
@@ -2297,6 +2295,7 @@ class LoretaVisualizerWindow(QWidget):
             return
         for combo in (self.source_method_combo, self.condition_combo, self.summary_combo):
             combo.setToolTip(combo.currentText())
+        self._sync_figure_export_button()
         has_conditions = bool(self._manifest_condition_groups)
         renderer_available = self.renderer is not None
         self.source_method_combo.setEnabled(
@@ -2339,10 +2338,6 @@ class LoretaVisualizerWindow(QWidget):
         self.compare_groups_check.setChecked(bool(enabled))
         self.compare_groups_check.blockSignals(previous)
         self.activation_scale_combo.setItemText(0, "Scale: both groups" if enabled else "Scale: current map")
-        self.export_figures_btn.setEnabled(self.renderer is not None and self._comparison_figure_thread is None and (not enabled or self._comparison_view == "difference"))
-        self.export_figures_btn.setToolTip(
-            "Return to a single group to export publication figures." if enabled else "Export publication figures."
-        )
         if self.renderer is not None:
             self.renderer.set_transparent_spin_enabled(False if enabled else self._transparent_spin_enabled)
         if not enabled:
@@ -2575,8 +2570,6 @@ class LoretaVisualizerWindow(QWidget):
         self.primary_group_label.setToolTip(omission_details)
         if self._comparison_renderer is not None:
             self.comparison_group_label.setToolTip(omission_details)
-        self.export_figures_btn.setEnabled(self.renderer is not None and self._mri_render_thread is None and self._comparison_figure_thread is None)
-        self.export_figures_btn.setToolTip("Export the displayed descriptive comparison.")
         self._sync_source_map_selectors_enabled()
 
     def _comparison_manifest_entries(self) -> tuple[PreparedSourceManifestEntry, ...]:
@@ -3060,36 +3053,59 @@ class LoretaVisualizerWindow(QWidget):
         if comparison is not None:
             comparison.copy_view_from(self.renderer)
 
-    def _open_export_figures(self) -> None:
-        if getattr(self, "_comparison_figure_thread", None) is not None:
-            return
-        if getattr(self, "_group_comparison_enabled", False):
-            if getattr(self, "_descriptive_payloads", ()):
-                if self._descriptive_key != self._descriptive_requested_key:
-                    return
-                if self._comparison_view == "ab":
-                    self._export_comparison_figures()
-                    return
-            else:
-                return
+    def _available_figure_exports(self) -> set[str]:
         renderer = self.renderer
-        can_export_split_figures = (
-            renderer is not None
-            and renderer.display_mode() == DISPLAY_MODE_SPLIT_HEMISPHERE
+        if renderer is None or self._comparison_figure_thread is not None or self._mri_render_thread is not None:
+            return set()
+        if self._group_comparison_enabled:
+            if not self._descriptive_payloads or self._descriptive_key != self._descriptive_requested_key:
+                return set()
+            if self._comparison_view == "ab":
+                return {EXPORT_FIGURES_ACTION_COMPARISON}
+        actions = set()
+        if (
+            self._source_activation_payload is not None
+            and self._display_mode == DISPLAY_MODE_SPLIT_HEMISPHERE
             and renderer.can_export_split_hemisphere_figure()
-        )
-        can_export_stacked_split_figures = (
-            self._selected_source_method_id
-            in {SOURCE_METHOD_L2_MNE_SOURCE_PSD, SOURCE_METHOD_L2_MNE_SURFACE}
-            and len(self._condition_options()) >= 2
-            and not getattr(self, "_group_comparison_enabled", False)
-        )
-        can_export_mri_slice_figures = self._can_export_mri_slice_figure()
+        ):
+            actions.add(EXPORT_FIGURES_ACTION_SPLIT_FIGURES)
+        if (
+            not self._group_comparison_enabled
+            and self._selected_source_method_id in {SOURCE_METHOD_L2_MNE_SOURCE_PSD, SOURCE_METHOD_L2_MNE_SURFACE}
+            and len(self._manifest_condition_groups) >= 2
+        ):
+            actions.add(EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES)
+        if self._can_export_mri_slice_figure():
+            actions.add(EXPORT_FIGURES_ACTION_MRI_SLICES)
+        return actions
+
+    def _sync_figure_export_button(self) -> None:
+        actions = self._available_figure_exports()
+        self.export_figures_btn.setEnabled(bool(actions))
+        if self._mri_render_thread is not None or self._comparison_figure_thread is not None:
+            tip = "Wait for the current figure to finish."
+        elif actions:
+            tip = "Export the displayed comparison." if self._group_comparison_enabled else "Export publication figures."
+        elif self._group_comparison_enabled:
+            tip = "Select an available descriptive comparison or return to a single map."
+        elif self._source_activation_payload is not None:
+            tip = "Use Split Hemispheres for a cortical figure or select an eLORETA volume map for MRI slices."
+        else:
+            tip = "Open Options to build or load a source map before exporting figures."
+        self.export_figures_btn.setToolTip(tip)
+
+    def _open_export_figures(self) -> None:
+        actions = self._available_figure_exports()
+        if not actions:
+            return
+        if EXPORT_FIGURES_ACTION_COMPARISON in actions:
+            self._export_comparison_figures()
+            return
         dialog = ExportFiguresDialog(
             self,
-            can_export_split_figures=can_export_split_figures,
-            can_export_stacked_split_figures=can_export_stacked_split_figures,
-            can_export_mri_slice_figures=can_export_mri_slice_figures,
+            can_export_split_figures=EXPORT_FIGURES_ACTION_SPLIT_FIGURES in actions,
+            can_export_stacked_split_figures=EXPORT_FIGURES_ACTION_STACKED_SPLIT_FIGURES in actions,
+            can_export_mri_slice_figures=EXPORT_FIGURES_ACTION_MRI_SLICES in actions,
         )
         if not dialog.exec():
             return
@@ -3175,10 +3191,7 @@ class LoretaVisualizerWindow(QWidget):
     def _comparison_figure_export_finished(self) -> None:
         self._comparison_figure_thread = None
         self._comparison_figure_worker = None
-        self.export_figures_btn.setEnabled(
-            self.renderer is not None and self._mri_render_thread is None
-            and (not self._group_comparison_enabled or bool(self._descriptive_payloads))
-        )
+        self._sync_figure_export_button()
         self._finish_deferred_close()
 
     def _export_split_hemisphere_figures(self) -> None:
@@ -3289,10 +3302,10 @@ class LoretaVisualizerWindow(QWidget):
         payload = self._source_activation_payload
         return (
             renderer is not None
-            and renderer.mesh_display_transform() is not None
             and self._fsaverage_dir is not None
             and payload is not None
             and payload.kind == SOURCE_KIND_VOLUME_POINTS
+            and renderer.mesh_display_transform() is not None
         )
 
     def _mri_slice_payload_for_current_source(self) -> SourcePayload:
@@ -4064,6 +4077,7 @@ class LoretaVisualizerWindow(QWidget):
             "Open Options to rebuild."
         )
         self._set_source_export_status(self._source_build_warning, variant="warning")
+        self._sync_figure_export_button()
 
     @Slot(object)
     def _on_project_source_maps_exported(self, result: object) -> None:
@@ -4698,6 +4712,7 @@ class LoretaVisualizerWindow(QWidget):
         self._sync_activation_render_mode_controls()
         self._sync_viewport_display_widget()
         renderer.set_activation_payload(empty_source_payload("No source map loaded"))
+        self._sync_figure_export_button()
         self.activation_scale_min_label.setText("")
         self.activation_scale_max_label.setText("")
 
@@ -4729,6 +4744,7 @@ class LoretaVisualizerWindow(QWidget):
         self._update_activation_scale_readout(vmin, vmax)
         if self._display_mode == DISPLAY_MODE_MRI_SLICES:
             self._render_mri_slice_payload(display_payload, scalar_range=(vmin, vmax))
+            self._sync_figure_export_button()
             return
         renderer.set_activation_payload(
             display_payload,
@@ -4743,6 +4759,7 @@ class LoretaVisualizerWindow(QWidget):
         )
         renderer.set_activation_opacity(self.activation_opacity_slider.value() / 100.0)
         renderer.set_activation_visible(self._activation_visible)
+        self._sync_figure_export_button()
 
     def _render_mri_slice_payload(
         self,
@@ -4889,11 +4906,7 @@ class LoretaVisualizerWindow(QWidget):
     def _mri_slice_render_finished(self) -> None:
         self._mri_render_thread = None
         self._mri_render_worker = None
-        self.export_figures_btn.setEnabled(
-            self.renderer is not None and getattr(self, "_comparison_figure_thread", None) is None and (
-                not getattr(self, "_group_comparison_enabled", False) or bool(getattr(self, "_descriptive_payloads", ()))
-            )
-        )
+        self._sync_figure_export_button()
         self._start_pending_mri_render()
         self._finish_deferred_close()
 

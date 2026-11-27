@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from Main_App.processing.roi_coverage import RoiCoverageGateError
+from Main_App.processing.canonical_harmonics import CanonicalHarmonicSelectionError
 from Tools.Individual_Detectability import core, export_run
 from Tools.Individual_Detectability.core import ConditionInfo, DetectabilitySettings, ManagedDetectabilityInputError
 from Tools.Individual_Detectability.project_coverage import (
@@ -14,6 +15,7 @@ from Tools.Individual_Detectability.project_coverage import (
     select_managed_conditions,
 )
 from Tools.Stats.analysis.canonical_harmonics import CUSTOM_HARMONIC_SOURCE
+from Main_App.projects import GroupInfo
 
 
 def _managed_fixture(tmp_path, monkeypatch, *, omitted=(), index_excluded=()):
@@ -24,6 +26,7 @@ def _managed_fixture(tmp_path, monkeypatch, *, omitted=(), index_excluded=()):
     records = tuple(
         SimpleNamespace(
             participant_id=participant,
+            group_id=None,
             recording_id=f"{participant}__{session}",
             condition=condition,
             path=tmp_path / f"{participant}__{session}_{condition}_Results.xlsx",
@@ -82,6 +85,39 @@ def _select(tmp_path, fixture, *, checkbox_exclusions=()):
         coverage=coverage,
         excluded_participants=set(checkbox_exclusions),
     )
+
+
+def test_same_condition_exports_one_grid_per_group_and_rejects_regrouped_selection(tmp_path, monkeypatch):
+    fixture = _managed_fixture(tmp_path, monkeypatch)
+    records, _cells, _receipt, index, _provenance, _conditions = fixture
+    groups = {
+        key: GroupInfo(key, key.title(), key.title(), tmp_path / "Input" / key)
+        for key in ("simulated", "comparison")
+    }
+    index.groups = groups
+    for record in records:
+        record.group_id = "simulated" if record.participant_id == "P1" else "comparison"
+    request = _export_request(tmp_path, monkeypatch, fixture)
+    request.conditions[:] = [
+        ConditionInfo("Faces", tmp_path, [
+            record.path for record in records if record.group_id == group.group_id and record.condition == "Faces"
+        ], group=group)
+        for group in groups.values()
+    ]
+    monkeypatch.setattr(export_run, "prevalidate_managed_conditions", lambda *_: None)
+    rendered = {}
+
+    def record_generation(*, condition, output_dir, **_):
+        rendered[output_dir.relative_to(request.output_root).as_posix()] = list(condition.files)
+        return len(condition.files), len(condition.files)
+
+    monkeypatch.setattr(export_run, "generate_condition_figure", record_generation)
+    export_run.run_detectability_export(request, log=lambda _: None, status=lambda _: None, progress=lambda _: None)
+    assert rendered == {f"Faces/{cond.group.folder_name}": cond.files for cond in request.conditions}
+    assert set(rendered) == {"Faces/Simulated", "Faces/Comparison"}
+    records[0].group_id = "comparison"
+    with pytest.raises(CanonicalHarmonicSelectionError, match="project condition or group changed"):
+        export_run.run_detectability_export(request, log=lambda _: None, status=lambda _: None, progress=lambda _: None)
 
 
 def _export_request(tmp_path, monkeypatch, fixture, *, excluded=()):
@@ -236,15 +272,17 @@ def test_export_uses_filtered_sources_before_read_cache_metadata_and_render(
     )
 
 
-def test_all_explicitly_excluded_conditions_are_omitted(tmp_path, monkeypatch):
-    fixture = _managed_fixture(tmp_path, monkeypatch)
-    assert _select(tmp_path, fixture, checkbox_exclusions={"P1", "P2"}) == []
-    request = _export_request(tmp_path, monkeypatch, fixture, excluded={"P1", "P2"})
+@pytest.mark.parametrize("qc_only", [False, True])
+def test_all_explicitly_excluded_conditions_are_omitted(tmp_path, monkeypatch, qc_only):
+    fixture = _managed_fixture(tmp_path, monkeypatch, omitted=range(8) if qc_only else ())
+    excluded = set() if qc_only else {"P1", "P2"}
+    assert _select(tmp_path, fixture, checkbox_exclusions=excluded) == []
+    request = _export_request(tmp_path, monkeypatch, fixture, excluded=excluded)
     log, status, progress = [], [], []
     assert export_run.run_detectability_export(
         request, log=log.append, status=status.append, progress=progress.append,
-    ) == request.output_root
-    assert log == ["No selected inputs remain after participant and project QC exclusions."]
+    ) is None
+    assert log == ["No figures were generated. No selected inputs remain after participant and project QC exclusions."]
     assert status == [] and progress == []
     assert not request.output_root.exists()
 

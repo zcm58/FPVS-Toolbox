@@ -123,8 +123,6 @@ class StatsWindow(
         self._pipeline_dv_policy: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_base_freq: dict[PipelineId, float] = {}
         self._pipeline_dv_metadata: dict[PipelineId, dict[str, object]] = {}
-        self._pipeline_outlier_config: dict[PipelineId, dict[str, object]] = {}
-        self._pipeline_qc_config: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_qc_state: dict[PipelineId, dict[str, object]] = {}
         self._pipeline_run_reports: dict[PipelineId, StatsRunReport | None] = {}
         self._last_export_path: str | None = None
@@ -162,6 +160,10 @@ class StatsWindow(
         self._refresh_dv_screening_controls()
         self._refresh_canonical_harmonic_summary()
 
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._harmonic_check = None
+        super().hideEvent(event)
+
     def _load_project_context_from_root(self, project_root: Path) -> None:
         """Refresh Stats output-path metadata from a project root."""
         self._project_path = Path(project_root).resolve()
@@ -196,12 +198,14 @@ class StatsWindow(
         old_root = getattr(self, "_project_path", None)
         if old_root is not None and Path(old_root).resolve() == new_root:
             return
+        self._harmonic_check = None
+        self._canonical_harmonic_selection = None
         self._invalidate_controller_context()
         self._load_project_context_from_root(new_root)
         self._clear_project_bound_stats_state(invalidate_controller=False)
         if hasattr(self, "setup_tabs"):
             self._sync_repeated_session_project_ui()
-        if hasattr(self, "harmonic_profile_value"):
+        if hasattr(self, "harmonic_profile_value") and self.isVisible():
             self._refresh_canonical_harmonic_summary()
         if clear_last_export:
             self._set_last_export_path(None)
@@ -284,8 +288,6 @@ class StatsWindow(
         self._pipeline_dv_policy.clear()
         self._pipeline_base_freq.clear()
         self._pipeline_dv_metadata.clear()
-        self._pipeline_outlier_config.clear()
-        self._pipeline_qc_config.clear()
         self._pipeline_qc_state.clear()
         self._pipeline_run_reports.clear()
         if hasattr(self, "conditions_list_layout"):

@@ -97,6 +97,9 @@ Rules:
   distinct cancelled outcome and must not publish a partial figure set or a
   normal completion result. Keep the worker/thread and host navigation locked
   until the worker actually returns.
+- Preserve any directory or link at a proposed figure path. If a file lock
+  prevents restoration after a failed publication, keep the original backup
+  and report the recovery directory in the error.
 - Visible ordinary figure titles should be condition names only. In two-group comparison
   mode, the selected condition is the overall title and canonical group labels
   are the two column headers. Do not add selected harmonics, subject counts, or

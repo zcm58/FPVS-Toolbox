@@ -1,9 +1,15 @@
+import threading
+from types import SimpleNamespace
+
 import pytest
 
 pd = pytest.importorskip("pandas")
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QThreadPool, QTimer
+    from PySide6.QtWidgets import QProgressDialog, QPushButton, QWidget
+    from Tools.Stats.ui import stats_window_exclusions
+    from Tools.Stats.ui.stats_window_exclusions import StatsWindowExclusionsMixin
     from Tools.Stats.analysis.prepared_analysis import prepare_analysis_payload
     from Tools.Stats.controller.stats_controller import PipelineId, StepId, WORKER_FN_BY_STEP
     from Tools.Stats.ui.stats_window import StatsWindow
@@ -125,3 +131,100 @@ def test_single_pipeline_completes_and_logs(qtbot, synced_window):
         lambda: "Single-Group Analysis finished" in synced_window.output_text.toPlainText(), timeout=2000
     )
     assert not synced_window._controller.is_running(PipelineId.SINGLE)
+
+
+@pytest.mark.qt
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+def test_screening_harmonic_check_keeps_events_running(
+    outcome, qtbot, tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "project.json").write_text("{}", encoding="utf-8")
+    selection = object()
+    gui_thread = threading.get_ident()
+    checking = threading.Event()
+    release = threading.Event()
+    event_ticks = []
+    reads = []
+
+    class Host(QWidget, StatsWindowExclusionsMixin):
+        project_dir = tmp_path
+
+        def _apply_canonical_harmonic_selection(self, result):
+            assert threading.get_ident() == gui_thread
+            assert result is selection
+            return {"accepted": True}
+
+    def validate(path):
+        assert path == tmp_path
+        assert threading.get_ident() != gui_thread
+        reads.append(path)
+        checking.set()
+        if not release.wait(4):
+            raise RuntimeError("GUI failed to process events during validation")
+        if outcome == "failure":
+            raise ValueError("changed source")
+        return selection
+
+    win = Host()
+    qtbot.addWidget(win)
+    win.pool = QThreadPool(win)
+    monkeypatch.setattr(stats_window_exclusions, "_load_project_selection", validate)
+    win._refresh_canonical_harmonic_summary()
+
+    def tick():
+        if checking.is_set():
+            event_ticks.append(True)
+            timer.stop()
+            if outcome == "cancel":
+                win.findChild(QProgressDialog).findChild(QPushButton).click()
+            else:
+                release.set()
+
+    timer = QTimer(win)
+    timer.timeout.connect(tick)
+    timer.start(10)
+    try:
+        if outcome == "failure":
+            with pytest.raises(RuntimeError, match="changed source"):
+                win._check_run_dv_policy()
+        elif outcome == "success":
+            assert win._check_run_dv_policy() == {"accepted": True}
+        else:
+            assert win._check_run_dv_policy() is None
+        assert event_ticks
+        assert reads == [tmp_path]
+    finally:
+        release.set()
+        assert win.pool.waitForDone(5000)
+
+
+@pytest.mark.qt
+def test_late_harmonic_previews_ignore_project_switch_and_close(qtbot, tmp_path, monkeypatch):
+    roots = [tmp_path / name for name in ("first", "second")]
+    for path in roots:
+        path.mkdir()
+        (path / "project.json").write_text("{}", encoding="utf-8")
+    win = StatsWindow(project_dir=str(roots[0]))
+    qtbot.addWidget(win)
+    queued = []
+    applied = []
+    win.pool = SimpleNamespace(start=queued.append)
+    monkeypatch.setattr(win, "_apply_canonical_harmonic_selection", applied.append)
+
+    win.show()
+    first = win._harmonic_check
+    win.rebind_project_context(roots[1])
+    second = win._harmonic_check
+    assert len(queued) == 2
+    with qtbot.waitSignal(first.finished):
+        queued[0].signals.finished.emit({"selection": "old project"})
+    win.close()
+    with qtbot.waitSignal(second.finished):
+        queued[1].signals.finished.emit({"selection": "closed window"})
+    assert applied == []
+
+    win.show()
+    assert len(queued) == 3
+    with qtbot.waitSignal(win._harmonic_check.finished):
+        queued[2].signals.finished.emit({"selection": "current project"})
+    assert applied == ["current project"]

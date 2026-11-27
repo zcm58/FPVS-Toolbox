@@ -53,6 +53,8 @@ class _PreviewHarness(gui.LoretaVisualizerWindow):
         self.errors = []
         self.shutdown_count = 0
         self._display_mode = gui.DISPLAY_MODE_MRI_SLICES
+        self._selected_source_method_id = gui.SOURCE_METHOD_ELORETA_VOLUME_SOURCE_PSD
+        self._group_comparison_enabled = False
         self._closing_requested = False
         self._auto_project_zscore_attempted = True
         self._mesh_thread = None

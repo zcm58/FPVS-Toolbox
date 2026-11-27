@@ -85,6 +85,28 @@ def test_open_existing_project_missing_root_prompts(monkeypatch, main_window, me
     assert ("Projects Root", "Project root not set.") in message_spy["info"]
 
 
+def test_resume_action_belongs_to_the_project_that_paused(tmp_path, main_window, monkeypatch):
+    from Main_App.gui import processing_workflows
+
+    first = tmp_path / "Study A"
+    second = tmp_path / "Study B"
+    for folder in (first, second):
+        folder.mkdir()
+        (folder / "project.json").write_text('{"event_map": {"Faces": 1}}', encoding="utf-8")
+
+    main_window.openProjectPath(str(first))
+    processing_workflows._set_resume_post_processing_pending(main_window, True)
+    main_window.openProjectPath(str(first))
+    assert main_window.btn_start.text() == "Resume Post-processing"
+
+    main_window.openProjectPath(str(second))
+    assert main_window.btn_start.text() == "Start Processing"
+    launches = []
+    monkeypatch.setattr(main_window, "start_processing", lambda: launches.append(main_window.currentProject.project_root))
+    main_window.btn_start.click()
+    assert launches == [second]
+
+
 @pytest.mark.parametrize("from_workspace", [False, True])
 def test_open_existing_project_empty_root_informs(
     tmp_path, main_window, monkeypatch, message_spy, qtbot, from_workspace,

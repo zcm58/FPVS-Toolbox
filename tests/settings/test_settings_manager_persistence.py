@@ -20,6 +20,43 @@ def _seed(path: Path) -> SettingsManager:
     return manager
 
 
+@pytest.mark.parametrize("ext", ["ini", "json"])
+def test_literal_project_path_survives_save_export_and_reopen(tmp_path: Path, ext: str) -> None:
+    settings_path = tmp_path / "settings.ini"
+    project = str(tmp_path / "視覚 50% (%(contrast)s)")
+    manager = SettingsManager(str(settings_path))
+    manager.set_project_root(project)
+    manager.set_recent_projects([project])
+    manager.save()
+    restored = SettingsManager(str(settings_path))
+    assert restored.get_project_root() == project
+    assert restored.get_recent_projects() == [project]
+    assert "視覚" in settings_path.read_text(encoding="utf-8")
+
+    exported = tmp_path / f"preferences.{ext}"
+    restored.export(str(exported))
+    restored.reset()
+    restored.load_from(str(exported))
+    assert restored.get_project_root() == project
+    assert restored.get_recent_projects() == [project]
+
+
+def test_legacy_local_encoding_survives_save_and_standalone_appearance_read(tmp_path, monkeypatch):
+    from Main_App.settings import settings_paths
+
+    monkeypatch.setenv("FPVS_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(settings_paths.locale, "getencoding", lambda: "cp1252")
+    path = settings_paths.app_settings_file()
+    path.write_bytes("[appearance]\nmode=Dark\n[paths]\nprojectsRoot=C:/Étude\n".encode("cp1252"))
+    assert read_saved_appearance_mode() == "Dark"
+    manager = SettingsManager(str(path))
+    assert manager.get_project_root() == "C:/Étude"
+    manager.set("debug", "enabled", "True")
+    manager.save()
+    assert "Étude" in path.read_text(encoding="utf-8")
+    assert read_saved_appearance_mode() == "Dark"
+
+
 @pytest.mark.parametrize(("stored", "effective"), [
     (None, "Auto"), ("System", "Auto"), ("light", "Light"),
     ("Dark", "Dark"), ("Auto", "Auto"), ("unsupported", "Auto"),

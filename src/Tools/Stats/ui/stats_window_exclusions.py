@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QProgressDialog
+
 from Main_App.projects.project_metadata import read_project_experimental_qc_settings
 from Main_App.processing.canonical_harmonics import (
     CanonicalHarmonicSelectionError,
@@ -16,6 +19,62 @@ from Tools.Stats.analysis.dv_policy_settings import (
 from Tools.Stats.ui.stats_window_support import *  # noqa: F403
 
 logger = logging.getLogger(__name__)
+
+
+def _load_project_selection(project_root: Path) -> SharedHarmonicSelection:
+    return load_project_processing_harmonics(
+        project_root=project_root,
+        log_func=lambda message: logger.debug(
+            "stats_canonical_harmonic_selection",
+            extra={"selection_message": str(message)},
+        ),
+    )
+
+
+class _HarmonicCheck(QObject):
+    """Share an active file check between the preview and a launch dialog."""
+
+    finished = Signal()
+
+    def __init__(self, view, manifest: Path):
+        super().__init__(view)
+        self.manifest = manifest
+        self.policy: dict[str, object] | None = None
+        self.error: str | None = None
+
+        def read(_progress, _message):
+            try:
+                return {"selection": _load_project_selection(manifest.parent)}
+            except (CanonicalHarmonicSelectionError, ValueError) as exc:
+                return {"error": str(exc)}
+
+        self.worker = StatsWorker(read, _op="check_project_harmonics")
+        self.worker.signals.finished.connect(self.checked, Qt.ConnectionType.QueuedConnection)
+        self.worker.signals.error.connect(self.failed, Qt.ConnectionType.QueuedConnection)
+
+    @Slot(object)
+    def checked(self, payload: dict) -> None:
+        view = self.parent()
+        if view._harmonic_check is self:
+            view._harmonic_check = None
+            self.error = payload.get("error")
+            if self.error is None:
+                try:
+                    self.policy = view._apply_canonical_harmonic_selection(payload["selection"])
+                except (RuntimeError, ValueError) as exc:
+                    self.error = str(exc)
+            if self.error is not None:
+                view._canonical_harmonic_selection = None
+                view._set_unavailable_harmonic_summary(
+                    "No current accepted selection",
+                    f"{self.error} Open Harmonic Settings to recalculate it.",
+                )
+        self.finished.emit()
+        self.deleteLater()
+
+    @Slot(str)
+    def failed(self, detail: str) -> None:
+        self.checked({"error": detail})
 
 
 class StatsWindowExclusionsMixin:
@@ -41,13 +100,39 @@ class StatsWindowExclusionsMixin:
         return project_root / "project.json"
 
     def _load_canonical_harmonic_selection(self) -> SharedHarmonicSelection:
-        return load_project_processing_harmonics(
-            project_root=getattr(self, "_project_path", self.project_dir),
-            log_func=lambda message: logger.debug(
-                "stats_canonical_harmonic_selection",
-                extra={"selection_message": str(message)},
-            ),
+        return _load_project_selection(self._project_manifest_path().parent)
+
+    def _start_harmonic_check(self, manifest: Path) -> _HarmonicCheck:
+        check = getattr(self, "_harmonic_check", None)
+        if check is None or check.manifest != manifest:
+            check = _HarmonicCheck(self, manifest)
+            self._harmonic_check = check
+            self.pool.start(check.worker)
+        return check
+
+    def _check_run_dv_policy(self) -> dict[str, object] | None:
+        """Validate one launch snapshot while keeping the window responsive."""
+
+        manifest = self._project_manifest_path()
+        if not manifest.is_file():
+            return self._get_dv_policy_payload()
+
+        dialog = QProgressDialog(
+            "Checking the project's accepted harmonics…", "Cancel", 0, 0, self
         )
+        dialog.setWindowTitle("Checking Project Harmonics")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.canceled.connect(dialog.reject)
+        check = self._start_harmonic_check(manifest)
+        check.finished.connect(dialog.accept)
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted or self._project_manifest_path() != manifest:
+                return None
+            if check.error is not None:
+                raise RuntimeError(check.error)
+            return check.policy
+        finally:
+            dialog.deleteLater()
 
     def _apply_canonical_harmonic_selection(
         self,
@@ -107,35 +192,30 @@ class StatsWindowExclusionsMixin:
             sync_provenance()
         return payload
 
-    def _refresh_canonical_harmonic_summary(self) -> bool:
-        """Refresh the read-only profile and included-list summary."""
+    def _refresh_canonical_harmonic_summary(self) -> None:
+        """Refresh the visible project's read-only preview in the background."""
 
-        if not self._project_manifest_path().is_file():
+        manifest = self._project_manifest_path()
+        if not manifest.is_file():
+            self._harmonic_check = None
             self._canonical_harmonic_selection = None
             self._set_unavailable_harmonic_summary(
                 "No project selection loaded",
                 "Open a project to inspect its accepted harmonics.",
             )
-            return False
-        try:
-            selection = self._load_canonical_harmonic_selection()
-            self._apply_canonical_harmonic_selection(selection)
-        except (CanonicalHarmonicSelectionError, ValueError) as exc:
-            self._canonical_harmonic_selection = None
-            self._set_unavailable_harmonic_summary(
-                "No current accepted selection",
-                f"{exc} Open Harmonic Settings to recalculate it.",
-            )
-            return False
-        return True
+            return
+        self._set_unavailable_harmonic_summary("Checking project selection…", "", included="Pending")
+        self._start_harmonic_check(manifest)
 
-    def _set_unavailable_harmonic_summary(self, profile: str, detail: str) -> None:
+    def _set_unavailable_harmonic_summary(
+        self, profile: str, detail: str, *, included: str = "Unavailable"
+    ) -> None:
         profile_widget = getattr(self, "harmonic_profile_value", None)
         if profile_widget is not None:
             profile_widget.setText(profile)
         included_widget = getattr(self, "harmonic_included_value", None)
         if included_widget is not None:
-            included_widget.setText("Unavailable")
+            included_widget.setText(included)
         note = getattr(self, "harmonic_selection_note", None)
         if note is not None:
             note.setText(detail)

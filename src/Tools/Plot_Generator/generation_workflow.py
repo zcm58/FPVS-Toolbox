@@ -305,7 +305,8 @@ class PlotGeneratorWorkflowMixin(PlotGeneratorLifecycleMixin):
                 return
 
             overlay_issue, _target = self._condition_overlay_validation()
-            if overlay_issue:
+            axis_issue, _axis_target = self._axis_range_issue()
+            if overlay_issue or axis_issue:
                 self._check_required()
                 return
 

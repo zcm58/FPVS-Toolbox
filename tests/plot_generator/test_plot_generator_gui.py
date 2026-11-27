@@ -135,6 +135,67 @@ def test_refresh_rois_preserves_valid_selection_and_blocks_empty_configuration(
     assert captured_worker_payload == ({"Keep": ["O1"]}, "Keep")
 
 
+def test_empty_processed_folder_offers_folder_selection(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
+    window = PlotGeneratorWindow(plot_mgr=PlotSettingsManager(tmp_path / "plot.ini"))
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window.activateWindow()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    window.folder_edit.setText(str(empty))
+    window._populate_conditions(str(empty))
+    window.out_edit.setText(str(tmp_path / "plots"))
+    assert window.condition_combo.count() == 0
+    assert not window.gen_btn.isEnabled()
+    assert "No processed conditions" in window.workflow_status.text()
+    window.fix_setup_btn.click()
+    qtbot.waitUntil(lambda: window.focusWidget() is window.input_folder_btn)
+
+    (empty / "Faces").mkdir()
+    window._populate_conditions(str(empty))
+    window.condition_combo.setCurrentIndex(-1)
+    assert "Choose a condition to plot" in window.workflow_status.text()
+    assert window._setup_issue_target is window.condition_combo
+    window.condition_combo.setCurrentText("Faces")
+    assert window.gen_btn.isEnabled()
+
+    window.folder_edit.clear()
+    window._populate_conditions("")
+    assert window.condition_combo.count() == 0
+
+
+@pytest.mark.parametrize(("axis", "offset"), [("X", 0), ("Y", -1)])
+def test_invalid_axis_range_blocks_generation_and_focuses_maximum(qtbot, tmp_path, monkeypatch, axis, offset):
+    monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
+    window = PlotGeneratorWindow(plot_mgr=PlotSettingsManager(tmp_path / "plot.ini"))
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window.activateWindow()
+    window.folder_edit.setText(str(tmp_path))
+    window.out_edit.setText(str(tmp_path))
+    window.condition_combo.addItem("Faces")
+    window.condition_combo.setCurrentText("Faces")
+    minimum, maximum = (
+        (window.xmin_spin, window.xmax_spin) if axis == "X"
+        else (window.ymin_spin, window.ymax_spin)
+    )
+    maximum.setValue(minimum.value() + offset)
+    assert not window.gen_btn.isEnabled()
+    assert f"{axis}-axis maximum" in window.workflow_status.text()
+    window.fix_setup_btn.click()
+    assert window.setup_tabs.currentWidget() is window.advanced_box
+    qtbot.waitUntil(lambda: window.focusWidget() is maximum or maximum.isAncestorOf(window.focusWidget()))
+    window._generate()
+    assert not window.has_active_generation()
+
+    maximum.setValue(minimum.value() + 1)
+    assert window.gen_btn.isEnabled()
+    assert window.fix_setup_btn.isHidden()
+
+
 def test_disabled_overlay_explains_problem_and_focuses_second_condition(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(plot_gui, "load_rois_from_settings", lambda *_: {"ROI": ["Cz"]})
     window = PlotGeneratorWindow()

@@ -972,11 +972,7 @@ def update_start_enabled(host: Any) -> None:
     btn = getattr(host, "btn_start", None)
     if not btn:
         return
-    if getattr(host, "_run_active", False) or getattr(
-        host,
-        "_frequency_domain_post_processing_resume_pending",
-        False,
-    ):
+    if getattr(host, "_run_active", False) or getattr(host, "_post_processing_resume_root", None) is not None:
         return
     mapping = validated_event_map(host)
     event_map_ready = bool(mapping)

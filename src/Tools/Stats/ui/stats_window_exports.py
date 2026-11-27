@@ -40,7 +40,9 @@ class StatsWindowExportsMixin:
 
     def _write_dv_metadata(self, out_dir: str, pipeline_id: PipelineId) -> None:
         """Handle the write dv metadata step for the Stats workflow."""
-        dv_policy = self._pipeline_dv_policy.get(pipeline_id, self._get_dv_policy_payload())
+        dv_policy = self._pipeline_dv_policy.get(pipeline_id)
+        if dv_policy is None:
+            dv_policy = self._get_dv_policy_payload()
         conditions = self._pipeline_conditions.get(pipeline_id, self._get_selected_conditions())
         base_freq = self._pipeline_base_freq.get(pipeline_id, self._current_base_freq)
         dv_meta = self._pipeline_dv_metadata.get(pipeline_id, {})
@@ -233,6 +235,19 @@ class StatsWindowExportsMixin:
 
     def on_export_stats_ready_clicked(self) -> None:
         """Write the optional workbook for external statistics packages."""
+        try:
+            dv_policy = self._check_run_dv_policy()
+        except (RuntimeError, ValueError) as exc:
+            message = (
+                f"Cannot export the stats-ready workbook: {exc} "
+                "Open Harmonic Settings and recalculate the accepted selection."
+            )
+            self._set_status(message)
+            self.append_log("General", message, level="warning")
+            return
+        if dv_policy is None:
+            self._set_status("Workbook export cancelled.")
+            return
         if not self._precheck(start_guard=True):
             return
 
@@ -259,7 +274,7 @@ class StatsWindowExportsMixin:
             subject_data=self.subject_data,
             base_freq=self._current_base_freq,
             rois=self.rois,
-            dv_policy=self._get_dv_policy_payload(),
+            dv_policy=dv_policy,
             group_map=getattr(self, "_participant_group_id_map", {}),
             group_label_map=getattr(self, "_subject_group_map", {}),
             output_path=str(output_path),

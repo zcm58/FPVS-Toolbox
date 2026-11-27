@@ -2,7 +2,7 @@
 # ruff: noqa: F405
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLayout, QProgressBar, QTabWidget
+from PySide6.QtWidgets import QFormLayout, QLayout, QProgressBar, QTabWidget
 
 from Main_App.gui.components import make_info_button, show_tool_info
 from Tools.Stats.ui.tool_info import STATS_TOOL_INFO
@@ -153,7 +153,6 @@ class StatsWindowUiMixin:
             Qt.AlignTop,
         )
         dv_layout.addLayout(harmonic_selection_row)
-        self._refresh_canonical_harmonic_summary()
 
         self.outlier_group = QWidget()
         self.outlier_group.setObjectName("stats_outlier_flagging")
@@ -704,6 +703,7 @@ class StatsWindowUiMixin:
         analysis_design_layout.addWidget(SubsectionHeaderLabel("Analysis design"))
 
         self.analysis_design_form = make_form_layout()
+        self.analysis_design_form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.analysis_mode_value = QLabel("Single Group")
         self.analysis_mode_value.setObjectName("stats_analysis_mode_value")
         self.analysis_design_form.addRow("Mode:", self.analysis_mode_value)

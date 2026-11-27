@@ -533,6 +533,11 @@ def load_project(
     if selected_file is not None:
         selected_file.clear()
     host._selected_bdf = None
+    resume_root = getattr(host, "_post_processing_resume_root", None)
+    if resume_root is not None and resume_root != project.project_root:
+        from Main_App.gui.processing_workflows import _set_resume_post_processing_pending
+
+        _set_resume_post_processing_pending(host, False)
     remember_saved_setup(host)
     outcome = getattr(host, "last_run_panel", None)
     if outcome is not None:
@@ -662,7 +667,8 @@ def sync_input_folder_display(host: Any) -> None:
         context = project_group_context(host.currentProject)
         has_groups = context.has_group_metadata
         if has_groups:
-            folder_text = f"{len(context.groups)} group raw-data folders configured"
+            count = len(context.groups)
+            folder_text = f"{count} group raw-data {'folder' if count == 1 else 'folders'} configured"
             tooltip = "\n".join(
                 f"{group.label}: {group.raw_input_folder}"
                 for group in context.groups

@@ -287,6 +287,11 @@ focus the conflicting selector, and disappear after correction. Change the
 condition count and verify hidden rows do not enter the request. Generate a
 five-condition plot with long legend labels and check all curves, distinct
 markers, participant counts, and complete labels below the axes in both files.
+On Axes and QC, enter a maximum equal to or below its minimum. Confirm
+Generate is disabled, Fix setup focuses the affected maximum, and correcting
+the range enables generation for an otherwise valid setup.
+Open SNR Plots before processing any recordings. Confirm the empty-condition
+message explains how to get results and Fix setup focuses the input folder.
 
 Visible smoke for publication styling: generate one condition/ROI, a condition
 overlay, a group overlay, and a session comparison. In both PNG and PDF, verify

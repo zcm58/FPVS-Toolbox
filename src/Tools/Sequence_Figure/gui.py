@@ -287,15 +287,15 @@ class SequenceFigureWindow(QWidget):
         self._thread.start()
 
     def _build_spec(self) -> SequenceFigureSpec | None:
-        missing = [
-            f"condition {condition + 1}, slot {slot + 1}"
-            for condition, image_paths in enumerate(self._image_paths[: self._condition_count])
-            for slot, path in enumerate(image_paths)
-            if not path
-        ]
-        if missing:
-            show_error(self, "Missing Images", f"Select images for: {', '.join(missing)}.")
-            return None
+        for condition, image_paths in enumerate(self._image_paths[: self._condition_count]):
+            missing = [slot for slot, path in enumerate(image_paths) if not path]
+            if missing:
+                self.condition_tabs.setCurrentIndex(condition)
+                tab_label = self.condition_tabs.tabText(condition)
+                labels = ", ".join(_slot_label(slot) for slot in missing)
+                show_error(self, "Missing images", f"Choose the missing images for {tab_label} ({labels}).")
+                self.image_rows[condition][missing[0]].button.setFocus()
+                return None
         if not self._output_folder:
             show_error(self, "Missing Output Folder", "Select an output folder.")
             return None
@@ -354,9 +354,8 @@ class SequenceFigureWindow(QWidget):
         self.export_btn.setText(_EXPORT_BUTTON_TEXT)
 
     def _open_output_folder(self) -> None:
-        if not self._output_folder:
-            return
-        open_path_in_file_manager(self._output_folder)
+        if self._last_result is not None:
+            open_path_in_file_manager(self._last_result.png_path.parent)
 
 
 def _slot_label(slot: int) -> str:

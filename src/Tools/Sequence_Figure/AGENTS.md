@@ -39,6 +39,11 @@ shell's close/update guard. A completed export from an earlier project must not
 restore that project's result-folder action on the refreshed page, including
 when the user switches away and returns before completion.
 
+Open Output Folder follows the last successful export in the same project.
+If any requested filename is already in use, export the complete set under
+the next available numbered name. A failed save removes the incomplete files
+from that attempt.
+
 Keep the fixed 13.333 x 7.5 inch figure and existing 600-DPI PNG/PDF/SVG export
 surface. Grayscale-safe styling affects markers, not stimulus pixels. Optional
 transparency applies only to PDF; PNG/SVG stay white. Wrap long condition labels

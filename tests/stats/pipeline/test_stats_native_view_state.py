@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from Tools.Stats.analysis.dv_policies import GROUP_SIGNIFICANT_POLICY_NAME
@@ -10,8 +12,9 @@ from Tools.Stats.analysis.inference_contracts import (
     HarmonicProvenance,
 )
 from Tools.Stats.analysis.prepared_analysis import AnalysisMode
-from Tools.Stats.common.stats_core import PipelineId, StepId
+from Tools.Stats.common.stats_core import PipelineId, PipelineStep, StepId
 from Tools.Stats.ui.stats_window_actions import StatsWindowActionsMixin
+from Tools.Stats.ui.stats_window_exports import StatsWindowExportsMixin
 from Tools.Stats.ui.inference_view_model import NativeInferenceOptions
 from Tools.Stats.ui.stats_window_pipeline import StatsWindowPipelineMixin
 from Tools.Stats.ui.stats_window_support import (
@@ -104,8 +107,9 @@ def test_preliminary_coverage_reports_complete_selected_conditions() -> None:
 
     assert coverage.complete_conditions == ("Faces",)
     assert coverage.incomplete_conditions == ()
-    assert "all 1 selected conditions" in format_preliminary_workbook_coverage(
-        coverage
+    assert format_preliminary_workbook_coverage(coverage) == (
+        "All selected workbooks are present before QC and manual exclusions "
+        "(2 participants, 1 condition)."
     )
 
 
@@ -208,13 +212,6 @@ def test_available_case_anova_config_defers_compatibility_to_worker() -> None:
     view._native_state_by_pipeline = {
         PipelineId.SINGLE: {"selected_conditions": ["Faces", "Objects"]}
     }
-    view._pipeline_outlier_config = {}
-    view._get_outlier_exclusion_payload = lambda: {}
-    view._pipeline_qc_config = {}
-    view._get_qc_exclusion_payload = lambda: {}
-    view._pipeline_qc_state = {}
-    view._pipeline_dv_policy = {}
-    view._get_dv_policy_payload = lambda: {}
     stored: list[tuple[PipelineId, StepId, dict]] = []
     applied: list[tuple[dict, bool]] = []
     view._store_native_step_payload = (
@@ -255,3 +252,76 @@ def test_standard_multigroup_pair_requires_exactly_two_groups() -> None:
                 "P3": "other",
             }
         )
+
+
+def test_each_screening_prepares_its_current_policy_and_exclusion_settings(tmp_path) -> None:
+    view = StatsWindowPipelineMixin()
+    pipeline = PipelineId.SINGLE
+    view._pipeline_dv_policy = {}
+    view._pipeline_qc_state = {}
+    view._current_base_freq, view._current_alpha = 6.0, 0.05
+    view.subjects, view.conditions = ["S1"], ["A", "B"]
+    view.subject_data = {"S1": {"A": "a.xlsx", "B": "b.xlsx"}}
+    view.rois = {"ROI": ["Cz"]}
+    view.project_title = "Study"
+    view._project_path = tmp_path
+    view.manual_excluded_pids = set()
+    view._get_selected_conditions = lambda: view.conditions
+    view._precheck = lambda **_kwargs: True
+    view._get_qc_exclusion_payload = lambda: {}
+    checked = iter([{"selection": "first"}, {"selection": "second"}])
+    view._check_run_dv_policy = lambda: next(checked)
+    thresholds = iter([50.0, 12.5])
+    view._get_outlier_exclusion_payload = lambda: {"abs_limit": next(thresholds)}
+
+    for current, limit in [("first", 50.0), ("second", 12.5)]:
+        assert view.ensure_pipeline_ready(pipeline)
+        prepare, _handler = view.get_step_config(pipeline, StepId.PREPARE_ANALYSIS)
+        assert prepare["dv_policy"] == {"selection": current}
+        assert prepare["outlier_abs_limit"] == limit
+        view.get_step_config(pipeline, StepId.MIXED_MODEL)
+        view.get_step_config(pipeline, StepId.SENSITIVITIES)
+
+
+def test_worker_submission_does_not_format_data_for_debug_logging(caplog) -> None:
+    class Data:
+        def __repr__(self):
+            raise AssertionError("Worker data was formatted during submission")
+
+    view = StatsWindowPipelineMixin()
+    submitted = []
+    view.pool = SimpleNamespace(start=submitted.append)
+    view._set_native_worker_progress = lambda *_args: None
+    step = PipelineStep(StepId.REPORT_BUNDLE, "Report", lambda: None, {"data": Data()}, lambda _: None)
+    view.start_step_worker(PipelineId.SINGLE, step, finished_cb=None, error_cb=None)
+    assert len(submitted) == 1
+    assert "stats_view_start_step_worker_log_enter_failed" not in caplog.text
+
+
+def test_stats_ready_export_can_retry_after_stale_or_cancelled_harmonic_check() -> None:
+    view = StatsWindowExportsMixin()
+    messages = []
+    view._set_status = messages.append
+    view.append_log = lambda *args, **kwargs: None
+    checked = iter([ValueError("source changed"), None, {"selection": "current"}])
+    attempts = []
+
+    def check():
+        result = next(checked)
+        if isinstance(result, ValueError):
+            raise result
+        return result
+
+    def precheck(*, start_guard):
+        attempts.append(start_guard)
+        return False
+
+    view._check_run_dv_policy = check
+    view._precheck = precheck
+    view.on_export_stats_ready_clicked()
+    view.on_export_stats_ready_clicked()
+    assert attempts == []
+    assert "source changed" in messages[0]
+    assert messages[1] == "Workbook export cancelled."
+    view.on_export_stats_ready_clicked()
+    assert attempts == [True]
