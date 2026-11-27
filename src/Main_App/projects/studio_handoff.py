@@ -65,6 +65,7 @@ _SESSION_FIELDS = frozenset({
 _RECORDING_FIELDS = frozenset({
     "recording_backend", "unicorn_udp_port", "brainproducts_serial_port", "brainproducts_parallel_address",
     "brainproducts_pulse_width_ms", "brainproducts_amplifier", "brainproducts_sampling_rate_hz",
+    "egi_parallel_address", "egi_pulse_width_ms",
     "acquisition_profile", "electrode_montage",
 })
 STUDIO_RECORDER_PLATFORMS = {
@@ -498,11 +499,11 @@ def _validate_acquisition_identity(
         raise ValueError("Unsupported Studio recording snapshot revision.")
     if recording.get("effective_backend") == "null":
         raise ValueError("Test/Pilot evidence cannot establish a completed recording handoff.")
+    selected = _recording_backend(recording.get("selected_backend"), "recording.selected_backend")
     if recording.get("effective_backend") not in (
         "serial", "brainproducts_triggerbox", "brainproducts_parallel", "unicorn_udp",
     ):
         raise ValueError("Unsupported Studio recording backend.")
-    selected = _recording_backend(recording.get("selected_backend"), "recording.selected_backend")
     if recording["effective_backend"] != _EFFECTIVE_BACKENDS[selected]:
         raise ValueError("Studio selected and effective recording backends conflict.")
     declared = data.get("recording")
@@ -548,6 +549,11 @@ def _validate_acquisition_identity(
 
 def _recording_backend(value: Any, field: str) -> str:
     backend = _text(value, field)
+    if backend == "egi_din":
+        raise ValueError(
+            "EGI wired DIN supports marker verification only. To inspect the saved Net Station .mff, "
+            "run python -m Main_App.io.verify_egi_din --help in the Toolbox source environment."
+        )
     if backend not in _EFFECTIVE_BACKENDS:
         raise ValueError(f"Unsupported Studio recording backend in {field}: {backend!r}.")
     return backend
