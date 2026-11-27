@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import locale
 import os
 import tempfile
 from pathlib import Path
@@ -15,6 +16,16 @@ ENV_CONFIG_HOME = "FPVS_CONFIG_HOME"
 
 class SettingsPathError(RuntimeError):
     """Raised when FPVS Toolbox cannot use the configured settings directory."""
+
+
+def read_settings_text(path: str | Path) -> str:
+    """Read portable UTF-8 settings and files saved with the old local encoding."""
+    with open(path, "rb") as stream:
+        data = stream.read()
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode(locale.getencoding())
 
 
 def app_config_home() -> Path:
@@ -135,4 +146,5 @@ __all__ = [
     "legacy_roaming_config_home",
     "legacy_settings_file",
     "legacy_plot_settings_file",
+    "read_settings_text",
 ]

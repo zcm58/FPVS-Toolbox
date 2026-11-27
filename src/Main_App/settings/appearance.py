@@ -3,7 +3,7 @@
 from configparser import ConfigParser, Error
 import logging
 
-from Main_App.settings.settings_paths import SettingsPathError, app_settings_file
+from Main_App.settings.settings_paths import SettingsPathError, app_settings_file, read_settings_text
 
 APPEARANCE_MODES = ("Light", "Dark", "Auto")
 DEFAULT_APPEARANCE_MODE = "Auto"
@@ -31,8 +31,8 @@ def read_saved_appearance_mode() -> str:
     config = ConfigParser()
     config.read_dict({"appearance": {"mode": DEFAULT_APPEARANCE_MODE}})
     try:
-        with app_settings_file(ensure_writable=False).open() as stream:
-            config.read_file(stream)
+        path = app_settings_file(ensure_writable=False)
+        config.read_string(read_settings_text(path), source=str(path))
     except FileNotFoundError:
         return DEFAULT_APPEARANCE_MODE
     except (Error, OSError, SettingsPathError, UnicodeError):

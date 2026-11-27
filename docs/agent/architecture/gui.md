@@ -41,7 +41,9 @@ Primary paths:
   overrides. `theme.py` retains the platform style before applying workspace
   Fusion, then applies it to the menu bar and its popups for native hover,
   transitions and keyboard feedback. With Qt’s Windows 11 default, use its
-  native WindowsVista menu style inside Fusion. Attaching Windows11 menus to
+  native WindowsVista menu style and palette inside Fusion. Windows paints
+  light backgrounds for these menus even in a dark workspace, so the menu bar,
+  popups and submenus use the WindowsVista foreground colors. Attaching Windows11 menus to
   Fusion crashes during normal Windows startup on Qt 6.9.1.
   `file_menu.py` groups project, Settings, cache, and application actions,
   including About. View contains Home (Ctrl+1) and Experiment Library, including
@@ -297,7 +299,8 @@ Primary paths:
   `Main_App.diagnostics.log_router`.
 - `src/Main_App/gui/processing_log_dialog.py`: focused modal viewer for the
   persistent Main App processing log. **Tools > Processing Log** opens the
-  viewer, and a failed run with a recorded failure reason links to it from Home.
+  viewer. The activity page's **View log** button opens the same viewer while
+  navigation is locked. A failed run with a recorded failure reason links to it from Home.
 - `src/Main_App/gui/roi_electrode_selector.py`: focused, settings-agnostic
   BioSemi64 map presentation. It owns the scalable nose-up map, accessible
   electrode controls, active-ROI styling, and color-ring visualization for

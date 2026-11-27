@@ -56,7 +56,9 @@ that display. The panel is blank when no electrode meets the detection rule.
 <p>
 Choose the processed Excel root, select conditions and participants, confirm
 output options, then run the analysis. Advanced settings control exploratory
-custom harmonics, thresholds, and correction options. Custom
+custom harmonics, thresholds, and correction options. Grouped projects list
+each condition separately for each group and save a separate grid for each.
+Custom
 harmonics do not replace the saved project selection.
 </p>
 

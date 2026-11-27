@@ -702,18 +702,15 @@ class StatsWindowPipelineMixin:
           - Logs when the finished/error slots are entered, including payload type/keys.
           - Tracks workers in self._active_workers so signals can't be dropped by GC.
         """
-        try:
-            logger.debug(
-                "stats_view_start_step_worker_enter",
-                extra={
-                    "pipeline": getattr(pipeline_id, "name", str(pipeline_id)),
-                    "step": getattr(step.id, "name", str(step.id)),
-                    "step_name": getattr(step, "name", repr(step)),
-                    "kwargs_keys": list(step.kwargs.keys()) if isinstance(step.kwargs, dict) else None,
-                },
-            )
-        except Exception:
-            logger.exception("stats_view_start_step_worker_log_enter_failed")
+        logger.debug(
+            "stats_view_start_step_worker_enter",
+            extra={
+                "pipeline": pipeline_id.name,
+                "step": step.id.name,
+                "step_name": step.name,
+                "kwargs_keys": list(step.kwargs),
+            },
+        )
 
         self._log_pipeline_event(pipeline=pipeline_id, step=step.id, event="start")
 
@@ -972,20 +969,25 @@ class StatsWindowPipelineMixin:
             )
             return False
         try:
-            self._get_dv_policy_payload()
+            dv_policy = self._check_run_dv_policy()
         except (RuntimeError, ValueError) as exc:
             message = (
                 f"The accepted project harmonic selection is unavailable: {exc} "
                 "Open Harmonic Settings and recalculate it before running "
                 "Standard FPVS Screening."
             )
-            self._refresh_canonical_harmonic_summary()
             self._set_status(message)
             self.append_log("General", message, level="warning")
             self._log_pipeline_event(
                 pipeline=pipeline_id,
                 event="end",
                 extra={"reason": "canonical_harmonic_selection_unavailable"},
+            )
+            return False
+        if dv_policy is None:
+            self._set_status("Screening cancelled.")
+            self._log_pipeline_event(
+                pipeline=pipeline_id, event="end", extra={"reason": "cancelled"}
             )
             return False
         if not self._precheck(require_anova=require_anova, start_guard=False):
@@ -1010,6 +1012,7 @@ class StatsWindowPipelineMixin:
             )
             return False
         self._native_options_by_pipeline = {pipeline_id: options}
+        self._pipeline_dv_policy[pipeline_id] = dv_policy
         self._log_pipeline_event(pipeline=pipeline_id, event="end")
         return True
 
@@ -1042,11 +1045,8 @@ class StatsWindowPipelineMixin:
             snapshot.get("selected_conditions")
             or self._get_selected_conditions()
         )
-        self._pipeline_dv_policy[pipeline_id] = self._get_dv_policy_payload()
         self._pipeline_base_freq[pipeline_id] = self._current_base_freq
         self._pipeline_dv_metadata[pipeline_id] = {}
-        self._pipeline_outlier_config[pipeline_id] = self._get_outlier_exclusion_payload()
-        self._pipeline_qc_config[pipeline_id] = self._get_qc_exclusion_payload()
         self._pipeline_qc_state.setdefault(pipeline_id, {"report": None})
         self._pipeline_run_reports[pipeline_id] = None
         self._native_step_store()[pipeline_id] = {}
@@ -1326,36 +1326,22 @@ class StatsWindowPipelineMixin:
 
         options = self._native_options_for(pipeline_id)
         run_spec = options.build_run_spec()
-        snapshots = getattr(self, "_native_state_by_pipeline", {})
-        snapshot = snapshots.get(pipeline_id, {})
-        selected_conditions = list(
-            snapshot.get("selected_conditions")
-            or self._get_selected_conditions()
-        )
-        outlier_payload = self._pipeline_outlier_config.get(
-            pipeline_id, self._get_outlier_exclusion_payload()
-        )
-        qc_payload = self._pipeline_qc_config.get(
-            pipeline_id,
-            self._get_qc_exclusion_payload(),
-        )
-        if step_id is StepId.PREPARE_ANALYSIS:
-            qc_state = {"report": None}
-            self._pipeline_qc_state[pipeline_id] = qc_state
-        else:
-            qc_state = self._pipeline_qc_state.get(
-                pipeline_id,
-                {"report": None},
-            )
-        dv_policy = self._pipeline_dv_policy.get(
-            pipeline_id,
-            self._get_dv_policy_payload(),
-        )
 
         def store(payload: dict) -> None:
             self._store_native_step_payload(pipeline_id, step_id, payload)
 
         if step_id is StepId.PREPARE_ANALYSIS:
+            snapshot = getattr(self, "_native_state_by_pipeline", {}).get(pipeline_id, {})
+            selected_conditions = list(
+                snapshot.get("selected_conditions") or self._get_selected_conditions()
+            )
+            dv_policy = self._pipeline_dv_policy.get(pipeline_id)
+            if dv_policy is None:
+                dv_policy = self._get_dv_policy_payload()
+            outlier_payload = self._get_outlier_exclusion_payload()
+            qc_payload = self._get_qc_exclusion_payload()
+            qc_state = {"report": None}
+            self._pipeline_qc_state[pipeline_id] = qc_state
             canonical_group_ids = (
                 self._canonical_group_ids_for_subjects(
                     snapshot.get("canonical_group_ids")  # type: ignore[arg-type]

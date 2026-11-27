@@ -48,6 +48,28 @@ def _stub_default_loader(monkeypatch):
 
 
 @pytest.mark.qt
+@pytest.mark.parametrize("size", [(1200, 800), (1280, 900)])
+def test_design_summary_shows_participant_counts_without_hover(qtbot, tmp_path, size):
+    window = StatsWindow(project_dir=str(tmp_path))
+    qtbot.addWidget(window)
+    window.resize(*size)
+    window.show()
+    window.update_analysis_design_summary(
+        mode_text="Single Group",
+        profile_text="Standard FPVS Screening",
+        group_text="Combined cohort: N=32 scanned participants",
+        coverage_text=(
+            "All selected workbooks are present before QC and manual exclusions "
+            "(32 participants, 2 conditions)."
+        ),
+    )
+    qtbot.waitExposed(window)
+    for label in (window.analysis_group_value, window.analysis_coverage_value):
+        assert label.width() >= min(label.fontMetrics().horizontalAdvance(label.text()), 700)
+        assert label.height() >= label.heightForWidth(label.width())
+
+
+@pytest.mark.qt
 def test_stats_window_layout_smoke(qtbot, tmp_path, app):
     window = StatsWindow(project_dir=str(tmp_path))
     qtbot.addWidget(window)

@@ -143,6 +143,47 @@ def test_data_quality_preparation_hides_step_label() -> None:
     assert label.visible is False
 
 
+def test_scan_explanation_shows_once_until_summary_has_new_information(qtbot) -> None:
+    from PySide6.QtWidgets import QLabel, QTableWidget, QWidget
+    from Main_App.gui.shell_status import prepare_processing_activity
+
+    page = QWidget()
+    qtbot.addWidget(page)
+    overview = QWidget(page)
+    panel = QWidget(overview)
+    intro = QLabel(page)
+    host = SimpleNamespace(
+        processing_files_table=QTableWidget(page),
+        processing_overview_row=overview,
+        processing_message_label=intro,
+        processing_summary_label=QLabel(panel),
+        processing_instruction_panel=panel,
+        processing_checklist_panel=QWidget(overview),
+        processing_checklist_label=QLabel(overview),
+        processing_status_separator=QWidget(page),
+        processing_live_heading_label=QLabel(page),
+        processing_current_file_label=QLabel(page),
+    )
+    prepare_processing_activity(host, [])
+    assert overview.isHidden() and host.processing_current_file_label.isHidden()
+    workflow._begin_preflight_page(
+        host, step=1, title="Scan Signal Health", message=workflow._DATA_QUALITY_SCAN_WAIT_MESSAGE,
+        busy=True, review_visible=False, checklist=("Possible disconnected electrodes",),
+    )
+    workflow._set_label(host, "processing_summary_label", workflow._DATA_QUALITY_SCAN_WAIT_MESSAGE)
+    assert panel.isHidden()
+    for widget in (overview, host.processing_checklist_panel, host.processing_status_separator,
+                   host.processing_live_heading_label, host.processing_current_file_label):
+        assert widget.isVisibleTo(page)
+    assert "Possible disconnected electrodes" in host.processing_checklist_label.text()
+    assert intro.text() == workflow._DATA_QUALITY_SCAN_WAIT_MESSAGE
+    workflow._set_label(host, "processing_current_file_label", "Scanning P01.bdf")
+    assert host.processing_current_file_label.text() == "Scanning P01.bdf"
+    workflow._set_label(host, "processing_summary_label", "Checked 1 of 2 participant files.")
+    assert panel.isVisibleTo(page)
+    assert host.processing_summary_label.text() == "Checked 1 of 2 participant files."
+
+
 def test_data_quality_review_updates_flat_section_title() -> None:
     review_panel = _LabelStub()
     review_title = _LabelStub()

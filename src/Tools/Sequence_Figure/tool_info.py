@@ -19,7 +19,8 @@ Choose the condition count and use each condition tab to select five images
 and enter a label (up to 24 characters). Enter the rate labels, choose optional
 grayscale-safe line/frame styling or a transparent PDF background, and select
 an output folder. Every export writes a 600-DPI PNG plus matching PDF and SVG
-files. PNG and SVG backgrounds stay white; grayscale-safe styling does not
+files. If any name is taken, all formats use the next available number.
+PNG and SVG backgrounds stay white; grayscale-safe styling does not
 convert the stimulus images themselves to grayscale.
 </p>
 

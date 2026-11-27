@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSignalBlocker, QThread, Qt, QUrl
+from PySide6.QtCore import QSignalBlocker, QThread, QThreadPool, Qt, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -49,8 +50,11 @@ from Main_App.gui.components import (
 )
 from Main_App.projects import (
     EXCEL_SUBFOLDER_NAME,
+    load_project_manifest_for_dataset_path,
     repeated_session_tool_block_reason,
     resolve_active_project_root,
+    resolve_output_directory,
+    resolve_project_excel_root,
 )
 
 from Main_App.processing.canonical_harmonics import (
@@ -62,9 +66,10 @@ from .core import (
     DetectabilitySettings,
     discover_conditions,
     parse_participant_id,
+    participant_sort_key,
     sanitize_filename_stem,
 )
-from .worker import IndividualDetectabilityWorker, RunRequest
+from .worker import IndividualDetectabilityWorker, ManagedConditionScan, RunRequest
 from .tool_info import INDIVIDUAL_DETECTABILITY_TOOL_INFO
 
 
@@ -92,7 +97,13 @@ class IndividualDetectabilityWindow(QWidget):
 
         self._project_root = self._resolve_project_root(project_root)
         self._last_dir: Optional[Path] = None
+        self._scanned_root: Path | None = None
+        self._participant_exclusions: set[str] = set()
         self._conditions: list[ConditionInfo] = []
+        self._settings_error = ""
+        self._scan_error = ""
+        self._scan_job: ManagedConditionScan | None = None
+        self._retired = False
         self._thread: Optional[QThread] = None
         self._worker: Optional[IndividualDetectabilityWorker] = None
         self._custom_harmonic_list_text = ", ".join(
@@ -121,7 +132,6 @@ class IndividualDetectabilityWindow(QWidget):
         self._build_advanced_tab()
         self._apply_button_icons()
 
-        self._set_default_input_root()
         self._refresh_conditions()
 
     def _resolve_project_root(self, provided_root: str | None) -> Optional[Path]:
@@ -232,6 +242,8 @@ class IndividualDetectabilityWindow(QWidget):
         self.output_root_open_btn = make_action_button("Open", compact=True, parent=group)
         self.output_root_open_btn.setAccessibleName("Open figure output folder")
         self.output_root_open_btn.clicked.connect(self._open_output_folder)
+        self.output_root_open_btn.setEnabled(False)
+        self.output_root_edit.textChanged.connect(self._update_open_output_button)
         self.output_root_row.row_layout.insertWidget(1, self.output_root_open_btn)
         form.addRow("Output folder:", self.output_root_row)
 
@@ -282,7 +294,7 @@ class IndividualDetectabilityWindow(QWidget):
             1, QHeaderView.Stretch
         )
         self.participant_table.verticalHeader().setVisible(False)
-        self.participant_table.itemChanged.connect(self._apply_participant_filter)
+        self.participant_table.itemChanged.connect(self._on_exclusion_changed)
         self.participant_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.participant_summary = QLabel("Excluded: 0 | Included: 0 | Total detected: 0")
@@ -495,12 +507,28 @@ class IndividualDetectabilityWindow(QWidget):
         self.view_generation_log_btn.setIcon(style.standardIcon(QStyle.SP_FileDialogInfoView))
 
     def _set_default_input_root(self) -> None:
-        if self.input_root_edit.text().strip():
+        if self._project_root is None:
             return
-        if self._project_root:
-            candidate = self._project_root / EXCEL_SUBFOLDER_NAME
-            if candidate.exists():
-                self.input_root_edit.setText(str(candidate))
+        candidate = self._project_root / EXCEL_SUBFOLDER_NAME
+        try:
+            manifest = load_project_manifest_for_dataset_path(self._project_root)
+            if manifest is not None:
+                candidate = resolve_project_excel_root(self._project_root, manifest)
+                if "\x00" in str(candidate):
+                    raise ValueError("The folder name contains a null character.")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._scan_error = f"Could not read the processed results path. Check project.json and refresh. {exc}"
+            return
+        if manifest is not None:
+            try:
+                output = resolve_output_directory(self._project_root, "Individual Detectability")
+            except ValueError:
+                logger.warning("No usable default Individual Detectability output folder.", exc_info=True)
+            else:
+                if not output.exists() or output.is_dir():
+                    self.output_root_edit.setText(str(output))
+        if manifest is not None or candidate.is_dir():
+            self.input_root_edit.setText(str(candidate))
 
     def _browse_input_root(self) -> None:
         start_dir = self._default_browse_dir()
@@ -528,8 +556,12 @@ class IndividualDetectabilityWindow(QWidget):
         return Path.home()
 
     def _refresh_conditions(self) -> None:
+        if self._scan_job is not None:
+            return
+        if not self.input_root_edit.text().strip():
+            self._set_default_input_root()
         root_text = self.input_root_edit.text().strip()
-        self._conditions = discover_conditions(Path(root_text)) if root_text else []
+        root = Path(root_text) if root_text else None
         logger.info(
             "individual_detectability_scan_start",
             extra={
@@ -537,6 +569,40 @@ class IndividualDetectabilityWindow(QWidget):
                 "excel_root": root_text,
             },
         )
+        if root is not None and self._project_root is not None and (self._project_root / "project.json").is_file():
+            self._scan_job = ManagedConditionScan(self._project_root, root)
+            self._scan_job.signals.finished.connect(self._conditions_loaded, Qt.ConnectionType.QueuedConnection)
+            self.refresh_btn.setEnabled(False)
+            self.input_root_btn.setEnabled(False)
+            self._update_run_state()
+            QThreadPool.globalInstance().start(self._scan_job)
+            return
+        try:
+            conditions = discover_conditions(root) if root is not None else []
+        except (OSError, ValueError) as exc:
+            logger.warning("Individual Detectability input discovery failed.", exc_info=True)
+            self._conditions_loaded([], f"Could not read the processed results. {exc}")
+        else:
+            self._conditions_loaded(conditions, self._scan_error if root is None else "")
+
+    @Slot(object, str)
+    def _conditions_loaded(self, conditions: list[ConditionInfo], error: str) -> None:
+        self._scan_job = None
+        if self._retired:
+            return
+        root_text = self.input_root_edit.text().strip()
+        root = Path(root_text) if root_text else None
+        unchecked_conditions = set()
+        if root == self._scanned_root:
+            selected = {(cond.name, cond.group) for cond in self._selected_conditions()}
+            unchecked_conditions = {(cond.name, cond.group) for cond in self._conditions} - selected
+        else:
+            self._participant_exclusions.clear()
+        self._scanned_root = root
+        self._scan_error = error
+        self._conditions = conditions
+        self.refresh_btn.setEnabled(True)
+        self.input_root_btn.setEnabled(True)
         logger.info(
             "individual_detectability_conditions_discovered",
             extra={
@@ -555,9 +621,9 @@ class IndividualDetectabilityWindow(QWidget):
         with QSignalBlocker(self.conditions_list):
             self.conditions_list.clear()
             for cond in self._conditions:
-                item = QListWidgetItem(f"{cond.name} ({len(cond.files)})")
+                item = QListWidgetItem(f"{cond.display_name} ({len(cond.files)})")
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked)
+                item.setCheckState(Qt.Unchecked if (cond.name, cond.group) in unchecked_conditions else Qt.Checked)
                 self.conditions_list.addItem(item)
         self._update_condition_summary()
         self._populate_participants()
@@ -598,31 +664,22 @@ class IndividualDetectabilityWindow(QWidget):
         participants_set: set[str] = set()
         per_condition_parsed: dict[str, list[str]] = {}
         for cond in selected:
-            cond_participants: set[str] = set()
-            for path in cond.files:
-                pid = parse_participant_id(path.stem)
-                if pid:
-                    cond_participants.add(pid)
-                    participants_set.add(pid)
-            sorted_cond_participants = sorted(
-                cond_participants,
-                key=lambda p: int(p[1:]) if p[1:].isdigit() else p,
+            cond_participants = cond.participant_ids or tuple(
+                {pid for path in cond.files if (pid := parse_participant_id(path.stem))}
             )
-            per_condition_parsed[cond.name] = sorted_cond_participants
+            participants_set.update(cond_participants)
+            per_condition_parsed[cond.display_name] = sorted(cond_participants, key=participant_sort_key)
 
-        participants = sorted(
-            participants_set,
-            key=lambda p: int(p[1:]) if p[1:].isdigit() else p,
-        )
+        participants = sorted(participants_set, key=participant_sort_key)
         logger.info(
             "individual_detectability_participants_discovered",
             extra={
                 "selected_conditions": [cond.name for cond in selected],
                 "per_condition": {
-                    cond.name: {
+                    cond.display_name: {
                         "file_count": len(cond.files),
-                        "participant_count": len(per_condition_parsed.get(cond.name, [])),
-                        "participants_sample": per_condition_parsed.get(cond.name, [])[:20],
+                        "participant_count": len(per_condition_parsed[cond.display_name]),
+                        "participants_sample": per_condition_parsed[cond.display_name][:20],
                     }
                     for cond in selected
                 },
@@ -646,12 +703,22 @@ class IndividualDetectabilityWindow(QWidget):
                 exclude_item.setFlags(
                     Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
                 )
-                exclude_item.setCheckState(Qt.Unchecked)
+                exclude_item.setCheckState(Qt.Checked if pid in self._participant_exclusions else Qt.Unchecked)
                 pid_item = QTableWidgetItem(pid)
                 pid_item.setFlags(pid_item.flags() & ~Qt.ItemIsEditable)
                 self.participant_table.setItem(row, 0, exclude_item)
                 self.participant_table.setItem(row, 1, pid_item)
         self._apply_participant_filter()
+
+    def _on_exclusion_changed(self, item: QTableWidgetItem) -> None:
+        participant = self.participant_table.item(item.row(), 1)
+        if item.column() == 0 and participant is not None:
+            if item.checkState() == Qt.Checked:
+                self._participant_exclusions.add(participant.text())
+            else:
+                self._participant_exclusions.discard(participant.text())
+        self._apply_participant_filter()
+        self._update_run_state()
 
     def _apply_participant_filter(self) -> None:
         search = self.participant_search.text().strip().lower()
@@ -696,7 +763,14 @@ class IndividualDetectabilityWindow(QWidget):
             self._custom_harmonic_list_text = text
 
     def _update_summary_text(self) -> None:
-        settings = self._collect_settings()
+        try:
+            settings = self._collect_settings()
+        except ValueError as exc:
+            self._settings_error = str(exc)
+            self.summary_box.setPlainText(self._settings_error)
+            self._update_run_state()
+            return
+        self._settings_error = ""
         if settings.harmonic_source == CUSTOM_HARMONIC_SOURCE:
             harmonic_text = ", ".join([str(h) for h in settings.oddball_harmonics_hz])
             source_text = "Custom/exploratory fixed harmonic list"
@@ -716,6 +790,7 @@ class IndividualDetectabilityWindow(QWidget):
             f"Letter portrait: {settings.use_letter_portrait}",
         ]
         self.summary_box.setText("\n".join(summary))
+        self._update_run_state()
 
     def _collect_settings(self) -> DetectabilitySettings:
         use_custom = self.use_custom_harmonics_check.isChecked()
@@ -738,14 +813,23 @@ class IndividualDetectabilityWindow(QWidget):
 
     def _parse_harmonics(self, text: str) -> list[float]:
         values: list[float] = []
+        seen: set[float] = set()
         for token in text.split(","):
             token = token.strip()
             if not token:
                 continue
             try:
-                values.append(float(token))
-            except ValueError:
-                continue
+                value = float(token)
+            except ValueError as exc:
+                raise ValueError(f"Custom harmonics: enter a frequency in Hz in place of '{token}'.") from exc
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("Custom harmonic frequencies must be finite and greater than zero.")
+            if value in seen:
+                raise ValueError(f"The custom harmonic {value:g} Hz appears more than once.")
+            seen.add(value)
+            values.append(value)
+        if not values:
+            raise ValueError("Enter at least one custom harmonic frequency in Hz.")
         return values
 
     def _collect_output_stems(self) -> dict[str, str]:
@@ -772,14 +856,22 @@ class IndividualDetectabilityWindow(QWidget):
             return
 
         blocker = ""
-        if not self.input_root_edit.text().strip():
+        if self._scan_job is not None:
+            blocker = "Reading processed results…"
+        elif self._scan_error:
+            blocker = self._scan_error
+        elif not self.input_root_edit.text().strip():
             blocker = "Choose the folder containing your processed Excel workbooks."
         elif not self._conditions:
             blocker = "No conditions found. Choose a folder with processed Excel workbooks."
         elif not self._selected_conditions():
             blocker = "Select at least one condition."
+        elif self.participant_table.rowCount() and len(self._excluded_participants()) == self.participant_table.rowCount():
+            blocker = "Include at least one participant to generate a figure."
         elif not self.output_root_edit.text().strip():
             blocker = "Choose an output folder."
+        elif self._settings_error:
+            blocker = f"Check Advanced settings. {self._settings_error}"
 
         self.run_btn.setEnabled(not blocker)
         if show_setup_status:
@@ -797,8 +889,12 @@ class IndividualDetectabilityWindow(QWidget):
         if path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
+    def _update_open_output_button(self) -> None:
+        path = self.output_root_edit.text().strip()
+        self.output_root_open_btn.setEnabled(bool(path) and Path(path).is_dir())
+
     def _start_run(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None or self._scan_job is not None:
             return
         try:
             repeated_block = repeated_session_tool_block_reason(
@@ -829,9 +925,10 @@ class IndividualDetectabilityWindow(QWidget):
         if not selected_conditions:
             show_error(self, "Error", "Select at least one condition.")
             return
-        settings = self._collect_settings()
-        if settings.harmonic_source == CUSTOM_HARMONIC_SOURCE and not settings.oddball_harmonics_hz:
-            show_error(self, "Error", "Provide at least one harmonic value.")
+        try:
+            settings = self._collect_settings()
+        except ValueError as exc:
+            show_error(self, "Check Advanced settings", str(exc))
             return
 
         request = RunRequest(
@@ -848,7 +945,7 @@ class IndividualDetectabilityWindow(QWidget):
         self.status_label.set_text("Starting...")
         self.status_label.set_variant("info")
 
-        self._thread = QThread()
+        self._thread = QThread(self)
         self._worker = IndividualDetectabilityWorker(request)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -859,28 +956,49 @@ class IndividualDetectabilityWindow(QWidget):
         self._worker.error.connect(self._thread.quit)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.finished.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._cleanup_worker)
         self._thread.start()
         self.run_btn.setEnabled(False)
 
     def _on_worker_error(self, message: str) -> None:
+        if self._retired:
+            logger.error("Individual Detectability export failed after switching projects: %s", message)
+            return
         self._append_log(message)
         self.status_label.set_text("Figure generation failed. See the generation log.")
         self.status_label.set_variant("error")
         show_error(self, "Individual Detectability error", message)
 
-    def _on_worker_finished(self, output_root: str) -> None:
+    def _on_worker_finished(self, output_root: str | None) -> None:
+        if self._retired:
+            return
+        self._update_open_output_button()
+        if output_root is None:
+            # The final log entry already explains whether exclusions or skipped inputs left no figures.
+            self.status_label.set_variant("warning")
+            self.progress.setValue(0)
+            return
         self.status_label.set_text("Complete.")
         self.status_label.set_variant("success")
         self.progress.setValue(100)
-        if self.open_on_complete_check.isChecked():
+        if self.open_on_complete_check.isChecked() and Path(output_root).is_dir():
             QDesktopServices.openUrl(QUrl.fromLocalFile(output_root))
 
     def _cleanup_worker(self) -> None:
-        if self._worker:
-            self._worker.deleteLater()
         if self._thread:
             self._thread.deleteLater()
         self._worker = None
         self._thread = None
+        if self._retired:
+            self.deleteLater()
+            return
         self._update_run_state(show_setup_status=False)
+
+    def retire_from_workspace(self) -> None:
+        """Release the old project's page once its outstanding export finishes."""
+        self._retired = True
+        self.log_dialog.close()
+        self.hide()
+        if self._thread is None:
+            self.deleteLater()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import re
+from threading import Barrier
+from typing import IO, Any
 
 import pytest
 from matplotlib.figure import Figure
@@ -63,6 +66,103 @@ def test_render_sequence_figure_exports_png_pdf_and_svg(tmp_path: Path) -> None:
         assert image.size == (288, 162)
 
 
+def test_export_keeps_source_images_and_existing_output_sets(tmp_path: Path) -> None:
+    paths = _image_paths(tmp_path, size=(40, 40))
+    source = paths[0]
+    original = source.read_bytes()
+    existing = tmp_path / f"{source.stem} (2).pdf"
+    existing.write_bytes(b"previous PDF")
+
+    result = render_sequence_figure(SequenceFigureSpec(
+        image_paths=paths, output_dir=tmp_path, basename=source.stem, png_dpi=36,
+    ))
+
+    assert source.read_bytes() == original
+    assert existing.read_bytes() == b"previous PDF"
+    assert {path.stem for path in result.output_paths} == {f"{source.stem} (3)"}
+    assert all(path.is_file() for path in result.output_paths)
+
+
+def test_windows_device_name_produces_portable_output_files(tmp_path: Path) -> None:
+    paths = _image_paths(tmp_path, size=(40, 40))
+    result = render_sequence_figure(SequenceFigureSpec(
+        image_paths=paths, output_dir=tmp_path, basename="nul.study", png_dpi=36,
+        export_svg=False,
+    ))
+    assert {path.name for path in result.output_paths} == {"_nul.study.png", "_nul.study.pdf"}
+    assert all(path.stat().st_size > 0 for path in result.output_paths)
+
+
+def test_simultaneous_exports_reserve_separate_complete_sets(tmp_path: Path, monkeypatch) -> None:
+    from Tools.Sequence_Figure import renderer
+
+    rendezvous = Barrier(2)
+    open_path = Path.open
+
+    def competing_open(path, mode="r", *args, **kwargs):
+        if path.name == "shared.png" and mode == "xb":
+            rendezvous.wait(timeout=5)
+        return open_path(path, mode, *args, **kwargs)
+
+    def save_marker(_figure, stream, *, format, **_options):
+        assert all(Path(stream.name).with_suffix(suffix).exists() for suffix in (".png", ".pdf", ".svg"))
+        stream.write(format if format == "svg" else format.encode())
+
+    spec = SequenceFigureSpec(
+        image_paths=_image_paths(tmp_path / "stimuli", size=(8, 8)), output_dir=tmp_path, basename="shared",
+    )
+    monkeypatch.setattr(renderer, "_build_figure", lambda *_args: Figure())
+    monkeypatch.setattr(Figure, "savefig", save_marker)
+    monkeypatch.setattr(Path, "open", competing_open)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(render_sequence_figure, (spec, spec)))
+
+    assert {result.png_path.stem for result in results} == {"shared", "shared (2)"}
+    for result in results:
+        for path in result.output_paths:
+            assert path.stem == result.png_path.stem
+            assert path.read_text() == path.suffix[1:]
+
+
+def test_late_pdf_collision_releases_only_own_reservations(tmp_path: Path, monkeypatch) -> None:
+    spec = SequenceFigureSpec(
+        image_paths=_image_paths(tmp_path / "stimuli", size=(8, 8)),
+        output_dir=tmp_path, basename="shared", png_dpi=36,
+    )
+    open_path = Path.open
+    competing_pdf = tmp_path / "shared.pdf"
+
+    def competing_open(path, mode="r", *args, **kwargs):
+        if path == competing_pdf and mode == "xb":
+            with open_path(path, "xb") as stream:
+                stream.write(b"another writer")
+        return open_path(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", competing_open)
+    result = render_sequence_figure(spec)
+    assert competing_pdf.read_bytes() == b"another writer"
+    assert not (tmp_path / "shared.png").exists()
+    assert not (tmp_path / "shared.svg").exists()
+    assert {path.stem for path in result.output_paths} == {"shared (2)"}
+
+
+def test_failed_export_removes_incomplete_formats(tmp_path: Path, monkeypatch) -> None:
+    paths = _image_paths(tmp_path / "images", size=(40, 40))
+    original_save = Figure.savefig
+
+    def fail_second_format(figure, destination, **kwargs):
+        if kwargs["format"] == "pdf":
+            raise OSError("PDF output unavailable")
+        original_save(figure, destination, **kwargs)
+
+    monkeypatch.setattr(Figure, "savefig", fail_second_format)
+    with pytest.raises(OSError, match="PDF output unavailable"):
+        render_sequence_figure(SequenceFigureSpec(
+            image_paths=paths, output_dir=tmp_path, basename="figure", png_dpi=36,
+        ))
+    assert list(tmp_path.glob("figure.*")) == []
+
+
 def test_render_sequence_figure_uses_requested_dpi_for_all_export_formats(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -71,12 +171,11 @@ def test_render_sequence_figure_uses_requested_dpi_for_all_export_formats(
 
     def savefig_spy(
         _figure: Figure,
-        path: Path,
+        stream: IO[Any],
         *_args: object,
         **kwargs: object,
     ) -> None:
-        save_calls.append((Path(path).suffix, kwargs.get("dpi")))
-        Path(path).write_bytes(b"")
+        save_calls.append((Path(stream.name).suffix, kwargs.get("dpi")))
 
     monkeypatch.setattr(Figure, "savefig", savefig_spy)
 
@@ -100,14 +199,13 @@ def test_render_sequence_figure_applies_transparency_to_pdf_only(
 
     def savefig_spy(
         _figure: Figure,
-        path: Path,
+        stream: IO[Any],
         *_args: object,
         **kwargs: object,
     ) -> None:
         save_calls.append(
-            (Path(path).suffix, kwargs.get("facecolor"), kwargs.get("transparent"))
+            (Path(stream.name).suffix, kwargs.get("facecolor"), kwargs.get("transparent"))
         )
-        Path(path).write_bytes(b"")
 
     monkeypatch.setattr(Figure, "savefig", savefig_spy)
 

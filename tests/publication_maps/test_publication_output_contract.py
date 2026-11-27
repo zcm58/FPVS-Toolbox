@@ -4,6 +4,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -174,6 +175,56 @@ def test_output_root_cannot_contaminate_processed_excel_tree(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="outside the Excel data tree"):
         PublicationArtifactTransaction(request)
+
+
+@pytest.mark.parametrize("create_before_render", [False, True])
+def test_publication_preserves_directory_named_like_a_figure(tmp_path: Path, create_before_render) -> None:
+    base = tmp_path / "maps"
+    prior = base / "faces.pdf"
+    directory = base / "faces.png"
+    base.mkdir()
+    def create_directory():
+        directory.mkdir()
+        (directory / "notes.txt").write_text("keep", encoding="utf-8")
+
+    if create_before_render:
+        create_directory()
+    prior.write_bytes(b"prior figure")
+
+    with pytest.raises(OSError, match="directory"):
+        with PublicationArtifactTransaction(_request(tmp_path, base)) as transaction:
+            transaction.stage_path(prior).write_bytes(b"new PDF")
+            transaction.stage_path(directory).write_bytes(b"new PNG")
+            if not create_before_render:
+                create_directory()
+            transaction.commit()
+
+    assert (directory / "notes.txt").read_text(encoding="utf-8") == "keep"
+    assert prior.read_bytes() == b"prior figure"
+
+
+def test_failed_restore_preserves_backup_and_reports_recovery_folder(tmp_path, monkeypatch):
+    base = tmp_path / "maps"
+    base.mkdir()
+    prior = base / "faces.pdf"
+    prior.write_bytes(b"old PDF")
+    replace = os.replace
+
+    def simulate_file_locks(source, destination):
+        if destination == base / "faces.png" or (source.parent.name == "previous" and destination == prior):
+            raise PermissionError("file locked")
+        replace(source, destination)
+
+    with pytest.raises(OSError, match="Recovery files") as error:
+        with PublicationArtifactTransaction(_request(tmp_path, base)) as transaction:
+            transaction.stage_path(prior).write_bytes(b"new PDF")
+            transaction.stage_path(base / "faces.png").write_bytes(b"new PNG")
+            monkeypatch.setattr(os, "replace", simulate_file_locks)
+            transaction.commit()
+
+    backup, = base.glob(".scalp-maps-stage-*/previous/faces.pdf")
+    assert backup.read_bytes() == b"old PDF"
+    assert str(backup.parent.parent) in str(error.value)
 
 
 @pytest.mark.parametrize("cancel_on_call", (3, 4))

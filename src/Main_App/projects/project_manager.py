@@ -761,6 +761,12 @@ def new_project(self) -> None:
         return
     use_existing_project_folder = False
     if project_dir.exists():
+        if not project_dir.is_dir():
+            QMessageBox.warning(
+                self, "Project Name Unavailable",
+                f"A file already uses this name in the Projects Root. Choose another project name.\n\n{project_dir}",
+            )
+            return
         if (project_dir / "project.json").exists():
             QMessageBox.critical(
                 self,
@@ -918,16 +924,13 @@ def new_project(self) -> None:
             )
             return
 
+    manifest = {
+        "name": project_name,
+        "options": {"mode": "batch"},
+        "preprocessing": project_preprocessing,
+    }
     if group_count == 1:
-        project = Project.load(
-            project_dir,
-            manifest={
-                "name": project_name,
-                "input_folder": group_folders["Input Folder"],
-                "options": {"mode": "batch"},
-                "preprocessing": project_preprocessing,
-            },
-        )
+        manifest["input_folder"] = group_folders["Input Folder"]
     else:
         used_group_ids: set[str] = set()
         groups_payload: dict[str, dict[str, object]] = {}
@@ -938,21 +941,22 @@ def new_project(self) -> None:
                 "folder_name": group_name,
                 "raw_input_folder": Path(folder),
             }
-        project = Project.load(
-            project_dir,
-            manifest={
-                "name": project_name,
-                "options": {"mode": "batch"},
-                "groups": groups_payload,
-                "preprocessing": project_preprocessing,
-            },
+        manifest["groups"] = groups_payload
+    try:
+        project = Project.load(project_dir, manifest=manifest)
+        project.name = project_name
+        project.options["mode"] = "batch"
+        project.participants = {}
+        project.groups_locked = False
+        project.groups_locked_at = None
+        project.save()
+    except (OSError, ValueError) as exc:
+        logger.exception("project_creation_failed root=%s", project_dir)
+        QMessageBox.critical(
+            self, "Project Creation Failed",
+            f"Could not create the project in {project_dir}.\n\n{exc}",
         )
-    project.name = project_name
-    project.options["mode"] = "batch"
-    project.participants = {}
-    project.groups_locked = False
-    project.groups_locked_at = None
-    project.save()
+        return
 
     self.currentProject = project
     self.loadProject(project)
@@ -1430,6 +1434,13 @@ def edit_project_settings(self) -> None:
     )
     if not folder:
         return
+    previous_folder = project.input_folder
     project.input_folder = Path(folder)
-    project.save()
+    try:
+        project.save()
+    except (OSError, ValueError) as exc:
+        project.input_folder = previous_folder
+        logger.exception("project_input_folder_save_failed root=%s", project.project_root)
+        QMessageBox.critical(self, "Project Save Error", str(exc))
+        return
     self.loadProject(project)

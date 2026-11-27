@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -182,3 +184,180 @@ def test_individual_detectability_scan_populates_participants_with_missingness(
         "AngryNeutral": "AngryNeutral_individual_detectability_grid_custom_harmonics",
         "HappyNeutral": "HappyNeutral_individual_detectability_grid_custom_harmonics",
     }
+
+
+@pytest.mark.parametrize("second_group", [False, True])
+def test_indexed_native_group_results_populate_page_and_preserve_selection(qtbot, tmp_path, second_group):
+    participants = [f"P{i}" for i in range(1, 32)] + ["E2P2final"]
+    groups = ["Simulated", "Comparison"] if second_group else ["Simulated"]
+    memberships = {pid: groups[i % len(groups)] for i, pid in enumerate(participants)}
+    excel = tmp_path / "Results" / "Processed"
+    for condition in ("Green", "Red"):
+        for pid, group in memberships.items():
+            folder = excel / condition / group
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{pid}_{condition}_Results.fpvs").touch()
+            (folder / f"{pid}_{condition}_Results.xlsx").touch()
+    manifest = {
+        "results_folder": "Results",
+        "subfolders": {"excel": "Processed"},
+        "groups": {
+            group.lower(): {"label": group, "folder_name": group, "raw_input_folder": f"Input/{group}"}
+            for group in groups
+        },
+        "participants": {pid: {"group_id": group.lower()} for pid, group in memberships.items()},
+    }
+    (tmp_path / "project.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path), embedded=True)
+    qtbot.addWidget(window)
+    assert Path(window.input_root_edit.text()) == excel
+    assert Path(window.output_root_edit.text()) == tmp_path / "Individual Detectability"
+    assert not window.output_root_open_btn.isEnabled()
+    qtbot.waitUntil(lambda: window._scan_job is None)
+    assert window.run_btn.isEnabled()
+    assert window.conditions_list.count() == 2 * len(groups)
+    assert sum(len(c.files) for c in window._conditions) == 64
+    assert {window.participant_table.item(row, 1).text() for row in range(32)} == set(participants)
+    for cond in window._conditions:
+        assert set(cond.participant_ids) == {pid for pid, group in memberships.items() if group == cond.group.label}
+        assert all(path.suffix == ".fpvs" and path.parent.name == cond.group.folder_name for path in cond.files)
+    window.conditions_list.item(0).setCheckState(QtCore.Qt.Unchecked)
+    window.refresh_btn.click()
+    qtbot.waitUntil(lambda: window._scan_job is None)
+    assert window._selected_conditions() == window._conditions[1:]
+
+
+def test_exclusions_and_condition_choices_survive_refresh_within_one_folder(qtbot, tmp_path):
+    roots = [tmp_path / "First", tmp_path / "Second"]
+    for root in roots:
+        for condition, pid in (("A", "P1"), ("B", "P2")):
+            folder = root / condition
+            folder.mkdir(parents=True)
+            (folder / f"{pid}_{condition}_Results.xlsx").touch()
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path))
+    qtbot.addWidget(window)
+    window.input_root_edit.setText(str(roots[0]))
+    window.refresh_btn.click()
+
+    window.participant_table.item(0, 0).setCheckState(QtCore.Qt.Checked)
+    window.conditions_list.item(0).setCheckState(QtCore.Qt.Unchecked)
+    window.refresh_btn.click()
+    assert [condition.name for condition in window._selected_conditions()] == ["B"]
+    assert window._excluded_participants() == set()
+    window.select_all_btn.click()
+    assert window._excluded_participants() == {"P1"}
+    window.refresh_btn.click()
+    assert window._excluded_participants() == {"P1"}
+    window.conditions_list.item(0).setCheckState(QtCore.Qt.Unchecked)
+
+    window.input_root_edit.setText(str(roots[1]))
+    window.refresh_btn.click()
+    assert [condition.name for condition in window._selected_conditions()] == ["A", "B"]
+    assert window._excluded_participants() == set()
+
+
+def test_custom_harmonics_rejects_invalid_entries_without_using_a_partial_list(qtbot, tmp_path):
+    excel = tmp_path / "1 - Excel Data Files" / "A"
+    excel.mkdir(parents=True)
+    (excel / "P1_A_Results.xlsx").touch()
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path))
+    qtbot.addWidget(window)
+    window.output_root_edit.setText(str(tmp_path))
+    window.use_custom_harmonics_check.setChecked(True)
+    for text in ("", "1.2, typo", "1.2, nan", "1.2, inf", "0", "-1", "1.2, 1.20"):
+        window.harmonics_edit.setText(text)
+        assert not window.run_btn.isEnabled()
+        assert "Check Advanced settings" in window.status_label.text()
+    window.harmonics_edit.setText("1.2, 2.4")
+    assert window.run_btn.isEnabled()
+    assert window._collect_settings().oddball_harmonics_hz == [1.2, 2.4]
+    window.harmonics_edit.setText("typo")
+    window.use_custom_harmonics_check.setChecked(False)
+    assert window.run_btn.isEnabled()
+
+
+def test_switch_project_keeps_running_export_until_finished(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QStackedWidget
+
+    excel = tmp_path / "1 - Excel Data Files" / "A"
+    excel.mkdir(parents=True)
+    (excel / "P1_A_Results.xlsx").touch()
+    started, finish = Event(), Event()
+    opened = []
+
+    def export(request, **_callbacks):
+        started.set()
+        if not finish.wait(5):
+            raise AssertionError("test export did not receive its completion signal")
+        return request.output_root
+
+    monkeypatch.setattr("Tools.Individual_Detectability.worker.run_detectability_export", export)
+    monkeypatch.setattr(
+        "Tools.Individual_Detectability.main_window.QDesktopServices.openUrl", opened.append
+    )
+    stack = QStackedWidget()
+    qtbot.addWidget(stack)
+    window = IndividualDetectabilityWindow(stack, str(tmp_path), embedded=True)
+    stack.addWidget(window)
+    window.output_root_edit.setText(str(tmp_path))
+    window._update_run_state()
+    window.run_btn.click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        stack.removeWidget(window)
+        window.retire_from_workspace()
+        assert window._thread in stack.findChildren(QtCore.QThread)
+        assert window._thread.isRunning()
+    finally:
+        finish.set()
+    with qtbot.waitSignal(window.destroyed):
+        pass
+    assert not opened
+
+
+def test_excluded_selection_and_qc_empty_export_do_not_open_previous_results(qtbot, tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    condition = tmp_path / "1 - Excel Data Files" / "Faces"
+    condition.mkdir(parents=True)
+    (condition / "P1_Faces_Results.xlsx").touch()
+    output = tmp_path / "previous"
+    output.mkdir()
+    (output / "figure.pdf").write_bytes(b"previous run")
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path))
+    qtbot.addWidget(window)
+    window.output_root_edit.setText(str(output))
+    window.participant_table.item(0, 0).setCheckState(QtCore.Qt.Checked)
+    assert not window.run_btn.isEnabled()
+    assert "Include at least one participant" in window.status_label.text()
+    window.participant_table.item(0, 0).setCheckState(QtCore.Qt.Unchecked)
+    assert window.run_btn.isEnabled()
+    monkeypatch.setattr(
+        "Tools.Individual_Detectability.export_run._require_current_project_inputs",
+        lambda request: (replace(request, conditions=[]), {}),
+    )
+    opened = []
+    monkeypatch.setattr("Tools.Individual_Detectability.main_window.QDesktopServices.openUrl", opened.append)
+    window.run_btn.click()
+    qtbot.waitUntil(lambda: window._thread is None)
+    assert "No figures were generated" in window.status_label.text()
+    assert window.status_label.property("statusVariant") == "warning"
+    assert not opened
+    assert (output / "figure.pdf").read_bytes() == b"previous run"
+
+
+def test_malformed_managed_results_path_shows_recoverable_error(qtbot, tmp_path):
+    manifest = tmp_path / "project.json"
+    manifest.write_text(json.dumps({"results_folder": "bad\x00folder"}), encoding="utf-8")
+    window = IndividualDetectabilityWindow(project_root=str(tmp_path))
+    qtbot.addWidget(window)
+    assert "Check project.json and refresh" in window.status_label.text()
+    assert not window.run_btn.isEnabled()
+
+    manifest.write_text("{}", encoding="utf-8")
+    (tmp_path / "1 - Excel Data Files").mkdir()
+    window.refresh_btn.click()
+    qtbot.waitUntil(lambda: window._scan_job is None)
+    assert Path(window.input_root_edit.text()) == tmp_path / "1 - Excel Data Files"
+    assert "Check project.json" not in window.status_label.text()

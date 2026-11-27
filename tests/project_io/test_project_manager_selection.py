@@ -19,7 +19,7 @@ from Main_App.projects.fpvs_config_import import (
 )
 from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.preprocessing_settings import new_project_preprocessing_settings
-from Main_App.projects.project import Project
+from Main_App.projects.project import DEFAULTS, Project
 from Main_App.projects.project_metadata import ProjectMetadata, read_project_metadata
 
 
@@ -31,6 +31,7 @@ def workflow() -> dict:
     names = {
         "_new_project_directory", "new_project", "_select_project_metadata",
         "_open_selected_project", "openProjectPath", "loadProject", "new_project_from_fpvs_config",
+        "edit_project_settings",
     }
     methods = [node for node in source.body
                if isinstance(node, ast.FunctionDef) and node.name in names]
@@ -84,6 +85,83 @@ def test_new_project_rejects_unsafe_name_before_followup(workflow, tmp_path, nam
     assert list(root.iterdir()) == []
     assert workflow["messages"][0][0] == "Invalid Project Name"
     assert not (tmp_path / "Outside").exists()
+
+
+def test_manual_creation_rejects_existing_file_before_setup(workflow, tmp_path):
+    collision = tmp_path / "Study"
+    collision.write_bytes(b"existing study notes")
+    previous = object()
+    host = SimpleNamespace(projectsRoot=tmp_path, currentProject=previous)
+    workflow["QInputDialog"] = SimpleNamespace(getText=lambda *_: ("Study", True))
+    messages = workflow["QMessageBox"]
+    messages.Yes, messages.No = 1, 2
+    messages.question = lambda *_: pytest.fail("Toolbox offered to create a project inside a regular file")
+
+    workflow["new_project"](host)
+
+    assert host.currentProject is previous
+    assert collision.read_bytes() == b"existing study notes"
+    assert workflow["messages"][0][0] == "Project Name Unavailable"
+
+
+def test_manual_creation_handles_unusable_output_folder_and_can_retry(workflow, tmp_path):
+    root = tmp_path / "Study"
+    root.mkdir()
+    collision = root / DEFAULTS["subfolders"]["excel"]
+    collision.write_bytes(b"existing notes")
+    raw = tmp_path / "recordings"
+    raw.mkdir()
+    previous = object()
+    loaded = []
+    host = SimpleNamespace(projectsRoot=tmp_path, currentProject=previous, loadProject=loaded.append)
+    workflow["QInputDialog"] = SimpleNamespace(
+        getText=lambda *_: ("Study", True), getInt=lambda *_: (1, True), getItem=lambda *_: ("flat", True),
+    )
+    workflow["QFileDialog"] = SimpleNamespace(getExistingDirectory=lambda *_: str(raw))
+    messages = workflow["QMessageBox"]
+    messages.Yes = 1
+    messages.No = 2
+    messages.question = lambda *_: messages.Yes
+
+    workflow["new_project"](host)
+
+    assert host.currentProject is previous
+    assert not loaded and not (root / "project.json").exists()
+    assert workflow["messages"][0][0] == "Project Creation Failed"
+    assert collision.read_bytes() == b"existing notes"
+    collision.rename(root / "notes.txt")
+
+    workflow["new_project"](host)
+    assert loaded == [host.currentProject]
+    assert host.currentProject.project_root == root
+    assert (root / "project.json").is_file()
+
+
+def test_input_folder_failed_save_preserves_source_and_allows_retry(workflow, tmp_path, monkeypatch):
+    project = Project.load(tmp_path / "Study")
+    project.save()
+    original = project.input_folder
+    before = project.manifest_path.read_bytes()
+    replacement = tmp_path / "new recordings"
+    replacement.mkdir()
+    loaded = []
+    host = SimpleNamespace(currentProject=project, loadProject=loaded.append)
+    workflow["QFileDialog"] = SimpleNamespace(getExistingDirectory=lambda *_: str(replacement))
+
+    def deny_save():
+        raise PermissionError("The project folder is read-only")
+
+    with monkeypatch.context() as denied:
+        denied.setattr(project, "save", deny_save)
+        workflow["edit_project_settings"](host)
+    assert project.input_folder == original
+    assert project.manifest_path.read_bytes() == before
+    assert loaded == []
+    assert workflow["messages"] == [("Project Save Error", "The project folder is read-only")]
+
+    workflow["edit_project_settings"](host)
+    assert loaded == [project]
+    assert project.input_folder == Project.load(project.project_root).input_folder == replacement
 
 
 @pytest.mark.parametrize("failure", [OSError("Cannot save project"), ValueError("Invalid hardware policy")])

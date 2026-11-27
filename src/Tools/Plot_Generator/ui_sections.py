@@ -526,4 +526,6 @@ class PlotGeneratorUiSectionsMixin:
         self.condition_b_combo.currentTextChanged.connect(self._on_condition_b_changed)
         self.roi_combo.currentTextChanged.connect(self._check_required)
         self.overlay_check.toggled.connect(self._check_required)
+        for limit in (self.xmin_spin, self.xmax_spin, self.ymin_spin, self.ymax_spin):
+            limit.valueChanged.connect(self._check_required)
         self._check_required()

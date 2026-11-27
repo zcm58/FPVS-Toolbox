@@ -152,6 +152,22 @@ def test_group_comparison_toggle_preserves_single_view_controls(qtbot, monkeypat
     monkeypatch.setattr(LoretaVisualizerWindow, "_refresh_current_activation", lambda _self: None)
     window = LoretaVisualizerWindow()
     qtbot.addWidget(window)
+    dialogs = []
+
+    def capture_export_options(dialog):
+        dialogs.append((
+            dialog.split_figures_btn.isEnabled(), dialog.stacked_split_figures_btn.isEnabled(),
+            dialog.mri_slice_figures_btn.isEnabled(),
+        ))
+        return 0
+
+    monkeypatch.setattr(gui.ExportFiguresDialog, "exec", capture_export_options)
+    window._on_project_source_maps_cancelled()
+    assert not window.export_figures_btn.isEnabled()
+    assert "Options" in window.export_figures_btn.toolTip()
+    window.export_figures_btn.click()
+    assert not dialogs
+
     entries = tuple(
         PreparedSourceManifestEntry(
             f"{group}_words_mean", f"{group} words raw mean z-score", Path(f"{group}.json"),
@@ -160,6 +176,11 @@ def test_group_comparison_toggle_preserves_single_view_controls(qtbot, monkeypat
     )
     window._replace_manifest_conditions(entries)
     window._select_first_condition_if_needed()
+    # A cancelled later method still leaves a completed two-condition cortical stack exportable.
+    window._on_project_source_maps_cancelled()
+    assert window.export_figures_btn.isEnabled()
+    window.export_figures_btn.click()
+    assert dialogs == [(False, True, False)]
     window.show()
     assert window.compare_groups_check.isEnabled()
 

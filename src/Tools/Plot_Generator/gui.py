@@ -365,11 +365,21 @@ class PlotGeneratorWindow(
         self._update_chart_title_state(self.condition_combo.currentText())
         QMessageBox.information(self, "Defaults", "Settings reset to defaults.")
 
+    def _axis_range_issue(self) -> tuple[str, QWidget | None]:
+        for axis, minimum, maximum in (
+            ("X", self.xmin_spin, self.xmax_spin),
+            ("Y", self.ymin_spin, self.ymax_spin),
+        ):
+            if minimum.value() >= maximum.value():
+                return f"The {axis}-axis maximum must be greater than its minimum.", maximum
+        return "", None
+
     def _check_required(self) -> None:
         input_folder = self.folder_edit.text().strip()
         output_folder = self.out_edit.text().strip()
         condition_a = self.condition_combo.currentText().strip()
         overlay_issue, overlay_target = self._condition_overlay_validation()
+        axis_issue, axis_target = self._axis_range_issue()
         required = bool(input_folder and output_folder and condition_a)
         status = ""
         variant = "info"
@@ -384,9 +394,19 @@ class PlotGeneratorWindow(
         elif not output_folder:
             status = "Choose the plot output folder."
             target = self.output_folder_btn
+        elif self.condition_combo.count() == 0:
+            status = (
+                "No processed conditions are available in this folder. "
+                "Finish processing the recordings or choose a folder with processed results."
+            )
+            target = self.input_folder_btn
         elif not condition_a:
             status = "Choose a condition to plot."
             target = self.condition_combo
+        elif axis_issue:
+            required = False
+            status, target = axis_issue, axis_target
+            variant = "warning"
         elif overlay_issue:
             required = False
             status = overlay_issue
@@ -421,5 +441,8 @@ class PlotGeneratorWindow(
     def _focus_setup_issue(self) -> None:
         target = getattr(self, "_setup_issue_target", None)
         if target is not None:
-            self.setup_tabs.setCurrentIndex(0)
+            if self.advanced_box.isAncestorOf(target):
+                self.setup_tabs.setCurrentWidget(self.advanced_box)
+            else:
+                self.setup_tabs.setCurrentIndex(0)
             target.setFocus()

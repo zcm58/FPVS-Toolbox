@@ -119,7 +119,13 @@ def test_missing_images_only_consider_active_conditions(page, tmp_path, monkeypa
     page.condition_count_spin.setValue(1)
     page._set_output_folder(tmp_path)
     assert page._build_spec() is None
-    assert "condition 1, slot 5" in errors[-1][1]
-    assert "condition 2" not in errors[-1][1]
+    assert errors[-1][1] == "Choose the missing images for Condition 1 (Base 1, Base 2, Base 3, Base 4, Oddball)."
     page._image_paths[0] = [str(tmp_path / f"slot-{slot}.png") for slot in range(5)]
     assert page._build_spec() is not None
+    page.condition_count_spin.setValue(3)
+    page.condition_label_edits[1].setText("Faces")
+    page._image_paths[1] = [*page._image_paths[0][:4], ""]
+    assert page._build_spec() is None
+    assert errors[-1][1] == "Choose the missing images for Faces (Oddball)."
+    assert page.condition_tabs.currentIndex() == 1
+    assert page.focusWidget() is page.image_rows[1][4].button

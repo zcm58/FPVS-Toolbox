@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import dataclass, field
+from itertools import count
+import os
 import re
 import textwrap
 from pathlib import Path
@@ -92,34 +95,56 @@ class SequenceFigureResult:
 
 
 def render_sequence_figure(spec: SequenceFigureSpec) -> SequenceFigureResult:
-    """Render a sequence illustration and save PNG/PDF outputs."""
+    """Export a new set of figure files, preserving previous exports and stimuli."""
     _validate_spec(spec)
-    output_stem = _safe_stem(spec.basename)
-    png_path = spec.output_dir / f"{output_stem}.png"
-    pdf_path = spec.output_dir / f"{output_stem}.pdf"
-    svg_path = spec.output_dir / f"{output_stem}.svg" if spec.export_svg else None
-
     images, warnings = _load_slot_images(spec)
     fig = _build_figure(spec, images)
     try:
-        fig.savefig(png_path, dpi=spec.png_dpi, facecolor="white", transparent=False)
-        fig.savefig(
-            pdf_path,
-            dpi=spec.png_dpi,
-            facecolor="none" if spec.transparent_pdf else "white",
-            transparent=spec.transparent_pdf,
-        )
-        if svg_path is not None:
-            fig.savefig(svg_path, dpi=spec.png_dpi, facecolor="white", transparent=False)
+        paths = _save_new_outputs(fig, spec)
     finally:
         plt.close(fig)
 
     return SequenceFigureResult(
-        png_path=png_path,
-        pdf_path=pdf_path,
-        svg_path=svg_path,
+        png_path=paths[0],
+        pdf_path=paths[1],
+        svg_path=paths[2] if spec.export_svg else None,
         warnings=tuple(warnings),
     )
+
+
+def _save_new_outputs(fig: Figure, spec: SequenceFigureSpec) -> tuple[Path, ...]:
+    stem = _safe_stem(spec.basename)
+    extensions = ("png", "pdf", "svg") if spec.export_svg else ("png", "pdf")
+    for version in count(1):
+        candidate = stem if version == 1 else f"{stem} ({version})"
+        paths = tuple(spec.output_dir / f"{candidate}.{ext}" for ext in extensions)
+        if any(os.path.lexists(path) for path in paths):
+            continue
+        # Reserve the entire set before rendering. Two processes may have
+        # found the same free name; only the winner writes figure data to it.
+        with ExitStack() as rollback:
+            with ExitStack() as streams:
+                outputs = []
+                for path in paths:
+                    try:
+                        # Match Matplotlib's native SVG text encoding and line endings.
+                        handle = path.open("x", encoding="utf-8") if path.suffix == ".svg" else path.open("xb")
+                    except FileExistsError:
+                        break
+                    outputs.append(streams.enter_context(handle))
+                    rollback.callback(path.unlink, missing_ok=True)
+                if len(outputs) != len(paths):
+                    continue
+                for path, stream in zip(paths, outputs):
+                    transparent = spec.transparent_pdf and path.suffix == ".pdf"
+                    fig.savefig(
+                        stream, format=path.suffix[1:], dpi=spec.png_dpi,
+                        facecolor="none" if transparent else "white",
+                        transparent=transparent,
+                    )
+            # Close every stream before disarming cleanup or unlinking files on Windows.
+            rollback.pop_all()
+        return paths
 
 
 def _validate_spec(spec: SequenceFigureSpec) -> None:
@@ -168,6 +193,8 @@ def _condition_image_paths(spec: SequenceFigureSpec) -> SequenceImagePaths:
 def _safe_stem(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
     cleaned = cleaned.strip("._-")
+    if re.fullmatch(r"CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]", cleaned.partition(".")[0], re.IGNORECASE):
+        cleaned = f"_{cleaned}"
     return cleaned or "fpvs_sequence_figure"
 
 

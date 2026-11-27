@@ -412,6 +412,11 @@ def init_ui(self) -> None:
 
     processing_header_layout.addWidget(processing_intro, 1)
 
+    view_log = make_action_button("View log", parent=processing_header)
+    view_log.setObjectName("processing_view_log_button")
+    view_log.clicked.connect(self.show_processing_log)
+    processing_header_layout.addWidget(view_log, 0, Qt.AlignVCenter)
+
     self.processing_action_slot = QWidget(processing_header)
     self.processing_action_slot.setObjectName("processing_action_slot")
     self.processing_action_slot.setVisible(False)

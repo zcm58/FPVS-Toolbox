@@ -8,6 +8,27 @@ from Tools.Stats.ui.stats_window import StatsWindow
 from Tools.Stats.workers.stats_workers import StatsWorker
 
 
+def test_repeated_session_dialog_stays_open_until_work_finishes(qtbot, tmp_path):
+    from PySide6.QtCore import Qt
+    from Tools.Stats.ui.repeated_session_dialog import RepeatedSessionAnalysisDialog
+
+    class HeldPool:
+        def start(self, task):
+            self.task = task
+
+    pool = HeldPool()
+    dialog = RepeatedSessionAnalysisDialog(tmp_path, thread_pool=pool)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    qtbot.keyClick(dialog, Qt.Key_Escape)
+    assert dialog.isVisible()
+    assert not dialog.close()
+    pool.task.signals.finished.emit()
+    qtbot.keyClick(dialog, Qt.Key_Escape)
+    assert not dialog.isVisible()
+
+
 def test_stats_focus_async(qtbot, monkeypatch):
     win = StatsWindow(project_dir=str(Path.cwd()))
     qtbot.addWidget(win)

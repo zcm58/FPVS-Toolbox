@@ -27,7 +27,9 @@ from Main_App.settings.appearance import (
     appearance_mode_from_config,
     normalize_appearance_mode,
 )
-from Main_App.settings.settings_paths import app_settings_dir, app_settings_file, legacy_settings_file
+from Main_App.settings.settings_paths import (
+    app_settings_dir, app_settings_file, legacy_settings_file, read_settings_text,
+)
 
 logger = logging.getLogger("Main_App.Shared.settings_manager")
 _SETTINGS_SAVE_LOCK = threading.RLock()
@@ -238,14 +240,18 @@ class SettingsManager:
         self.config = _default_config()
         self._saved_values = _config_values(self.config)
         migrated = False
-        if os.path.exists(self.ini_path):
-            self.config.read(self.ini_path)
-            self._saved_values = _config_values(self.config)
-        elif self._uses_default_path:
-            old_path = legacy_settings_file()
-            if _path_exists_for_migration(old_path):
-                self.config.read(old_path)
-                migrated = True
+        try:
+            if os.path.exists(self.ini_path):
+                self.config.read_string(read_settings_text(self.ini_path), source=self.ini_path)
+                self._saved_values = _config_values(self.config)
+            elif self._uses_default_path:
+                old_path = legacy_settings_file()
+                if _path_exists_for_migration(old_path):
+                    self.config.read_string(read_settings_text(old_path), source=str(old_path))
+                    migrated = True
+        except OSError:
+            # A temporarily inaccessible preferences file used to be skipped by ConfigParser.read().
+            logger.warning("settings_file_unavailable", exc_info=True)
         if self._uses_default_path:
             migrated = self._migrate_legacy_qt_settings() or migrated
         migrated = self._migrate_legacy_roi_defaults() or migrated
@@ -291,8 +297,7 @@ class SettingsManager:
             else:
                 latest = _default_config()
                 if target.exists():
-                    with target.open() as stream:
-                        latest.read_file(stream)
+                    latest.read_string(read_settings_text(target), source=str(target))
                 merged = _merge_config_changes(latest, self.config, self._saved_values)
             # Capture the next baseline before publication so an allocation
             # failure cannot leave the live configuration behind the saved INI.
@@ -302,7 +307,7 @@ class SettingsManager:
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="w", dir=target.parent, prefix=f".{target.name}.",
-                    suffix=".tmp", delete=False,
+                    suffix=".tmp", delete=False, encoding="utf-8",
                 ) as stream:
                     temporary = Path(stream.name)
                     merged.write(stream)
@@ -322,10 +327,10 @@ class SettingsManager:
         ext = os.path.splitext(path)[1].lower()
         if ext == '.json':
             data = _config_values(self.config)
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
         else:
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 self.config.write(f)
 
     def export_named(self, name: str, ext: str = '.ini') -> str:
@@ -353,12 +358,10 @@ class SettingsManager:
         imported = _default_config()
         ext = os.path.splitext(path)[1].lower()
         if ext == '.json':
-            with open(path, 'r') as f:
-                data = json.load(f)
+            data = json.loads(read_settings_text(path))
             imported.read_dict(data)
         else:
-            with open(path, 'r') as f:
-                imported.read_file(f)
+            imported.read_string(read_settings_text(path), source=path)
         previous = self.config
         self.config = imported
         try:
@@ -407,7 +410,9 @@ class SettingsManager:
     def set(self, section: str, option: str, value: str) -> None:
         if not self.config.has_section(section):
             self.config.add_section(section)
-        self.config.set(section, option, value)
+        # GUI fields are literal text. Preserve ConfigParser interpolation for
+        # expressions in imported INIs while escaping user-entered percent signs.
+        self.config.set(section, option, value.replace('%', '%%'))
 
     def get_appearance_mode(self) -> str:
         """Read the saved mode, treating legacy System as Auto."""

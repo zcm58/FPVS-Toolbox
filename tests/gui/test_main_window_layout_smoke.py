@@ -339,7 +339,7 @@ def test_main_window_layout_smoke(tmp_path: Path, qtbot, monkeypatch) -> None:
     assert condition_header.font().bold()
     assert trigger_header.font().bold()
     assert win.findChild(QWidget, "log_group") is None
-    assert win.findChild(QPushButton, "processing_view_log_button") is None
+    assert win.homeWidget.findChild(QPushButton, "processing_view_log_button") is None
     assert not hasattr(win, "btn_detect")
     assert win.btn_select_input_file.text() == "Browse…"
     assert win.btn_select_input_folder.text() == "Browse…"
@@ -427,6 +427,22 @@ def test_home_analysis_entry_points_live_in_the_tools_menu(
     assert opened == routes
     assert warnings == routes[1:]
     assert win.workspace_stack.currentWidget() is win.homeWidget
+
+
+@pytest.mark.parametrize(("count", "noun"), [(1, "folder"), (2, "folders")])
+def test_home_group_folder_summary_uses_configured_count(qtbot, tmp_path, count, noun):
+    from Main_App.gui.project_workflows import sync_input_folder_display
+
+    field = QLineEdit()
+    qtbot.addWidget(field)
+    groups = {
+        name: {"label": name, "raw_input_folder": str(tmp_path / name)}
+        for name in ("Control", "Study")[:count]
+    }
+    project = SimpleNamespace(project_root=tmp_path, groups=groups, participants={})
+    sync_input_folder_display(SimpleNamespace(currentProject=project, le_input_folder=field))
+    assert field.text() == f"{count} group raw-data {noun} configured"
+    assert len(field.toolTip().splitlines()) == count
 
 
 def test_home_previews_folder_and_switches_scope_only_after_file_selection(tmp_path, qtbot, monkeypatch):
@@ -544,8 +560,9 @@ def _menu_action_image(bar, action):
     return bar.grab(bar.actionGeometry(action)).toImage()
 
 
+@pytest.mark.parametrize("appearance_mode", ["Light", "Dark"])
 def test_workspace_menu_keeps_native_style_and_readable_labels(
-    tmp_path: Path, qtbot, monkeypatch,
+    tmp_path: Path, qtbot, monkeypatch, appearance_mode: str,
 ) -> None:
     app = QApplication.instance()
     previous_palette = app.palette()
@@ -554,21 +571,40 @@ def test_workspace_menu_keeps_native_style_and_readable_labels(
     app.setStyleSheet("")
     previous_style = app.style().objectName()
     try:
-        win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode="Light")
+        win = _build_window(tmp_path, qtbot, monkeypatch, appearance_mode=appearance_mode, enable_beta_tools=True)
         win.show_home_page()
         _activate_menu_window(win, qtbot)
         bar = win.menuBar()
         assert bar.isVisibleTo(win)
         assert bar.focusPolicy() == Qt.FocusPolicy.NoFocus
         QTest.mouseMove(win.stacked, QPoint(20, 20), delay=10)
-        for action in bar.actions():
-            image = _menu_action_image(bar, action)
+        def assert_readable(menu, action):
+            rect = menu.actionGeometry(action)
+            # Sample the label, excluding menu borders, icon gutters, arrows and dividers.
+            inset = 4 if menu is bar else menu.fontMetrics().horizontalAdvance("MMMM")
+            rect.adjust(inset, 3, -4, -3)
+            image = menu.grab(rect).toImage()
             levels = [
                 image.pixelColor(x, y).lightness()
                 for y in range(image.height())
                 for x in range(image.width())
             ]
-            assert max(levels) - min(levels) > 60, action.text()
+            assert max(levels) - min(levels) > 80, (appearance_mode, action.text())
+
+        for action in bar.actions():
+            assert_readable(bar, action)
+        tools = _menu(win, "toolsMenu")
+        beta = _menu(win, "betaToolsMenu")
+        try:
+            tools.popup(bar.mapToGlobal(bar.actionGeometry(tools.menuAction()).bottomLeft()))
+            qtbot.waitUntil(tools.isVisible)
+            assert_readable(tools, tools.actions()[0])
+            beta.popup(tools.mapToGlobal(tools.actionGeometry(beta.menuAction()).topRight()))
+            qtbot.waitUntil(beta.isVisible)
+            assert_readable(beta, beta.actions()[0])
+        finally:
+            beta.hide()
+            tools.hide()
     finally:
         app.setStyleSheet("")
         app.setStyle(previous_style)
@@ -791,6 +827,14 @@ def test_processing_activity_page_locks_navigation_and_reuses_start_button(
     assert not win.menuBar().isEnabled()
     _menu_action(win, "viewMenu", "btn_home").trigger()
     assert win.workspace_stack.currentWidget() is win.processing_page
+
+    view_log = win.processing_page.findChild(QPushButton, "processing_view_log_button")
+    assert view_log.isVisibleTo(win) and view_log.isEnabled()
+    qtbot.mouseClick(view_log, Qt.LeftButton)
+    qtbot.waitUntil(win.processing_log_dialog.isVisible)
+    win.processing_log_dialog.reject()
+    assert win.workspace_stack.currentWidget() is win.processing_page
+    assert not win.menuBar().isEnabled()
 
     win._busy_stop()
     qtbot.wait(20)

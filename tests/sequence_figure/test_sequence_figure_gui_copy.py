@@ -174,6 +174,19 @@ def test_owned_export_thread_blocks_a_second_generation(tmp_path: Path) -> None:
     assert page._thread is thread
 
 
+def test_open_output_follows_completed_export_after_choosing_next_folder(tmp_path, monkeypatch):
+    page = _SequencePageDouble(tmp_path)
+    original = tmp_path / "first"
+    page._last_result = SequenceFigureResult(original / "plot.png", original / "plot.pdf", None)
+    page._set_output_folder(tmp_path / "next")
+    opened = []
+    monkeypatch.setattr(gui, "open_path_in_file_manager", opened.append)
+
+    gui.SequenceFigureWindow._open_output_folder(page)
+
+    assert opened == [original]
+
+
 def test_returning_to_original_project_does_not_reattach_pending_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

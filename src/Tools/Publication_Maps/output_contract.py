@@ -67,6 +67,7 @@ class PublicationArtifactTransaction:
         self.staging_output_root.mkdir(parents=True, exist_ok=True)
         self._entries: dict[Path, Path] = {}
         self._committed = False
+        self._preserve_recovery = False
 
     def __enter__(self) -> PublicationArtifactTransaction:
         return self
@@ -101,15 +102,8 @@ class PublicationArtifactTransaction:
     def stage_path(self, final_path: Path) -> Path:
         """Allocate and register a staged counterpart for ``final_path``."""
 
-        final = Path(final_path).resolve(strict=False)
-        target = self.target_root.resolve(strict=False)
-        try:
-            relative = final.relative_to(target)
-        except ValueError as exc:
-            raise ValueError(
-                f"Scalp Maps artifact escapes its output directory: {final}"
-            ) from exc
-        staged = self.staging_output_root / relative
+        final = self._artifact_destination(final_path)
+        staged = self.staging_output_root / final.relative_to(self.target_root)
         staged.parent.mkdir(parents=True, exist_ok=True)
         self._entries[final] = staged
         return staged
@@ -125,8 +119,20 @@ class PublicationArtifactTransaction:
             raise ValueError(
                 f"Staged Scalp Maps artifact escapes its transaction: {staged}"
             ) from exc
-        final = (self.target_root / relative).resolve(strict=False)
+        final = self._artifact_destination(self.target_root / relative)
         self._entries[final] = staged
+        return final
+
+    def _artifact_destination(self, path: Path) -> Path:
+        # Validate the parent and the leaf separately: resolving the leaf would
+        # follow an existing link and replace its target instead of the named file.
+        final = path.parent.resolve() / path.name
+        if final == self.target_root or not final.is_relative_to(self.target_root):
+            raise ValueError(f"Scalp Maps artifact escapes its output directory: {final}")
+        if final.is_symlink():
+            raise OSError(f"Scalp Maps cannot replace a linked destination: {final}")
+        if final.is_dir():
+            raise IsADirectoryError(f"Scalp Maps cannot replace a directory: {final}")
         return final
 
     def commit(self, *, cancel_check: CancelCheck | None = None) -> tuple[Path, ...]:
@@ -148,6 +154,7 @@ class PublicationArtifactTransaction:
             for final, staged in entries:
                 if cancel_check is not None:
                     cancel_check()
+                self._artifact_destination(final)
                 final.parent.mkdir(parents=True, exist_ok=True)
                 if final.exists():
                     relative = final.relative_to(self.target_root.resolve(strict=False))
@@ -160,17 +167,24 @@ class PublicationArtifactTransaction:
             if cancel_check is not None:
                 cancel_check()
         except Exception:  # Atomic commit boundary: roll back every publish/cancel failure.
-            rollback_root = self._stage_root / "rollback-new"
+            failures = []
             for final in reversed(published):
-                if final.exists():
-                    relative = final.relative_to(self.target_root.resolve(strict=False))
-                    displaced = rollback_root / relative
-                    displaced.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(final, displaced)
+                if final not in backups:
+                    try:
+                        final.unlink(missing_ok=True)
+                    except OSError as exc:
+                        failures.append(exc)
             for final, backup in backups.items():
-                if backup.exists():
+                try:
                     final.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(backup, final)
+                except OSError as exc:
+                    failures.append(exc)
+            if failures:
+                self._preserve_recovery = True
+                raise OSError(
+                    f"Scalp Maps could not restore all files. Recovery files are in {self._stage_root}"
+                ) from failures[0]
             raise
 
         self._committed = True
@@ -180,7 +194,7 @@ class PublicationArtifactTransaction:
     def abort(self) -> None:
         """Discard only this transaction's hidden staging directory."""
 
-        if self._committed:
+        if self._committed or self._preserve_recovery:
             return
         # Cleanup must never mask the cancellation or generation exception
         # which caused ``__exit__`` to abort the transaction. Windows virus

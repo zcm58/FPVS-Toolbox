@@ -207,7 +207,7 @@ class PlotGeneratorSelectionMixin:
         indexed = getattr(self, "_selection_dataset_index", None)
         if indexed is not None and indexed.manifest is not None:
             subfolders = list(indexed.conditions)
-        else:
+        elif folder:
             try:
                 subfolders = sorted(
                     (
@@ -219,6 +219,8 @@ class PlotGeneratorSelectionMixin:
                 )
             except OSError:
                 subfolders = []
+        else:
+            subfolders = []
 
         combos = [self.condition_combo, self.condition_b_combo, *self.extra_condition_combos]
         with ExitStack() as blockers:

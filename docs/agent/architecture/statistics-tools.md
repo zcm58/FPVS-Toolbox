@@ -119,7 +119,11 @@ Stats grouping:
   compatibility re-exports, not additional implementations.
 - `ui/`: window mixins, dialogs, widget assembly, and small widgets.
 - `controller/`: run coordination, mode-specific pipeline state, cancellation,
-  and worker scheduling.
+  and worker scheduling. Showing the Stats page checks the accepted project
+  harmonics in the background. Screening and Stats-ready export each start a
+  fresh check or join the current project's in-progress check. The user can
+  cancel the launch while it runs. All queued steps share that launch's policy.
+  Data preparation verifies the processing-owned sources when it consumes them.
 - `workers/`: Qt worker wrappers and GUI-agnostic statistical job execution.
   `multigroup_workers.py` owns the prepared-data worker boundary used by both
   native modes despite its historical filename.

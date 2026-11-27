@@ -11,6 +11,7 @@ from .core import (
     ConditionInfo,
     DetectabilitySettings,
     generate_condition_figure,
+    parse_participant_id,
     prevalidate_managed_conditions,
     sanitize_filename_stem,
 )
@@ -26,6 +27,7 @@ from Main_App.processing.canonical_harmonics import (
     custom_harmonic_selection,
     load_project_processing_harmonics,
 )
+from Main_App.projects import resolve_group_output_directory
 
 
 @dataclass(frozen=True)
@@ -45,16 +47,21 @@ def run_detectability_export(
     log: Callable[[str], None],
     status: Callable[[str], None],
     progress: Callable[[int], None],
-) -> Path:
-    """Export selected conditions and return the requested output directory."""
+) -> Path | None:
+    """Return the output directory if this run produced a figure, otherwise None."""
     import matplotlib
 
     matplotlib.use("Agg", force=True)
     req, managed_coverage = _require_current_project_inputs(req)
     total_conditions = len(req.conditions)
-    if total_conditions == 0:
-        log("No selected inputs remain after participant and project QC exclusions.")
-        return req.output_root
+    if not total_conditions or (
+        managed_coverage is None and req.excluded_participants and all(
+            parse_participant_id(path.stem) in req.excluded_participants
+            for condition in req.conditions for path in condition.files
+        )
+    ):
+        log("No figures were generated. No selected inputs remain after participant and project QC exclusions.")
+        return None
 
     preflight_log: list[str] = []
     effective_settings = _resolve_effective_settings(
@@ -92,9 +99,12 @@ def run_detectability_export(
             managed_coverage,
         )
 
+        produced_figures = False
         for idx, condition in enumerate(req.conditions, start=1):
-            write_log(f"Processing condition: {condition.name}")
+            write_log(f"Processing condition: {condition.display_name}")
             condition_out = req.output_root / sanitize_filename_stem(condition.name)
+            if condition.group is not None:
+                condition_out = resolve_group_output_directory(condition_out, condition.group.folder_name)
             stem = req.output_stems.get(condition.name) or sanitize_filename_stem(
                 f"{condition.name}_individual_detectability_grid"
             )
@@ -111,10 +121,14 @@ def run_detectability_export(
                 managed_coverage_by_workbook=managed_coverage,
             )
             write_log(
-                f"Condition {condition.name}: processed {processed} of {total} files."
+                f"Condition {condition.display_name}: processed {processed} of {total} files."
             )
+            produced_figures = produced_figures or processed > 0
             pct = int(idx / total_conditions * 100)
             progress(pct)
+        if not produced_figures:
+            write_log("No figures were generated. The generation log lists the skipped inputs.")
+            return None
 
     status("Individual detectability export complete.")
     progress(100)
@@ -136,7 +150,7 @@ def _require_current_project_inputs(
     from Main_App.processing.roi_coverage import RoiCoverageGateError
 
     try:
-        dataset_index = load_project_dataset_index(req.input_root)
+        dataset_index = load_project_dataset_index(req.project_root)
         provenance = require_current_project_full_fft_provenance(
             req.project_root,
             dataset_index=dataset_index,
@@ -221,6 +235,10 @@ def _write_run_metadata(
         "output_root": str(req.output_root),
         "project_root": str(req.project_root) if req.project_root else "",
         "selected_conditions": [condition.name for condition in req.conditions],
+        "selected_condition_groups": [
+            {"condition": condition.name, "group_id": condition.group.group_id}
+            for condition in req.conditions if condition.group is not None
+        ],
         "excluded_participants": sorted(req.excluded_participants, key=_participant_sort_key),
         "harmonic_source": settings.harmonic_source,
         "exploratory": settings.harmonic_source == CUSTOM_HARMONIC_SOURCE,
@@ -257,7 +275,7 @@ def _log_header(
         log(f"QC-20/QC-21 final release: {release_fingerprint}")
     log("Selected conditions:")
     for cond in req.conditions:
-        log(f" - {cond.name} ({len(cond.files)} files)")
+        log(f" - {cond.display_name} ({len(cond.files)} files)")
     log(f"Harmonic source: {settings.harmonic_source}")
     if settings.harmonic_fingerprint:
         log(f"Harmonic fingerprint: {settings.harmonic_fingerprint}")

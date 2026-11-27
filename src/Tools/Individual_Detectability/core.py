@@ -10,7 +10,7 @@ import statistics
 import traceback
 from typing import Callable, Mapping, Sequence, TYPE_CHECKING
 
-from Main_App.projects import list_result_files
+from Main_App.projects import GroupInfo, list_result_files
 from Main_App.io.spectral_data import spectral_companion_identity
 from Main_App.io.atomic_write import atomic_write
 from Main_App.io.xlsx_selected_reader import (
@@ -168,6 +168,17 @@ class ConditionInfo:
     name: str
     path: Path
     files: list[Path]
+    group: GroupInfo | None = None
+    participant_ids: tuple[str, ...] = ()
+
+    @property
+    def display_name(self) -> str:
+        if self.group is None:
+            return self.name
+        label = self.group.label
+        if self.group.group_id.casefold() != label.casefold():
+            label = f"{label} ({self.group.group_id})"
+        return f"{self.name} — {label}"
 
 
 @dataclass(frozen=True)
@@ -197,7 +208,7 @@ def parse_participant_id(filename: str) -> str | None:
     return None
 
 
-def _pid_sort_key(pid: str) -> tuple[int, str]:
+def participant_sort_key(pid: str) -> tuple[int, str]:
     m = re.match(r"(?i)P(\d+)$", pid.strip())
     if m:
         return int(m.group(1)), pid
@@ -1376,7 +1387,7 @@ def generate_condition_figure(
         log(f"No participants to plot for {condition.name}.")
         return 0, total
 
-    records.sort(key=lambda r: _pid_sort_key(r[0]))
+    records.sort(key=lambda r: participant_sort_key(r[0]))
 
     n = len(records)
     ncols = requested_cols

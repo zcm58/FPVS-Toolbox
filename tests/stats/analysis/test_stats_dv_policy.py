@@ -73,8 +73,8 @@ def test_stats_payload_and_summary_follow_canonical_fixed_selection(
     qtbot.addWidget(window)
     window.show()
 
-    assert window.harmonic_profile_value.text() == (
-        "Fixed / preregistered harmonic domain (v1.0)"
+    qtbot.waitUntil(
+        lambda: window.harmonic_profile_value.text() == "Fixed / preregistered harmonic domain (v1.0)"
     )
     assert window.harmonic_included_value.text() == "1.2, 2.4, 3.6 Hz"
     assert "abcdef123456" in window.harmonic_selection_note.text()

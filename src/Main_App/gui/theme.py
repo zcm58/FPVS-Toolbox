@@ -66,7 +66,6 @@ def build_fpvs_app_stylesheet() -> str:
     checkbox_check = _appearance_asset_url("checkbox-check")
     return f"""
         QWidget {{
-            color: {TEXT_PRIMARY};
             font-family: {css_font_family()};
             font-size: {css_font_size("body")};
         }}
@@ -477,6 +476,9 @@ def apply_native_menu_style(menu_bar: QMenuBar) -> None:
             raise RuntimeError(f"Cannot create the platform menu style: {name}")
         style.setParent(menu)
         menu.setStyle(style)
+        if name.casefold() == "windowsvista":
+            # Vista paints light native menu backgrounds even in a dark Fusion workspace.
+            menu.setPalette(style.standardPalette())
 
 
 def _apply_app_appearance(app: QApplication) -> None:

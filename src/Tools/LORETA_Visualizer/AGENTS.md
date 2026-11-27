@@ -362,7 +362,9 @@ per-method/group/condition correction scope in outputs and disclosures.
   work runs in `QThread` or `QRunnable`; workers communicate by signals and must
   not touch widgets.
 - Keep source rebuild/import controls in Source Map Options. Keep figure actions
-  in the Export Figures modal, with one side-panel entry point.
+  in the Export Figures modal, with one side-panel entry point. Enable that
+  entry point only when the current selection has an available export.
+  After a cancelled build, completed methods remain eligible for export.
 - Use one current/all-conditions/fixed color-scale selector. All-conditions
   limits apply only to the selected method and exact summary; never substitute
   a different summary. Preview and comparison export use the same limits.

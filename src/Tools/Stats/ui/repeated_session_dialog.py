@@ -153,6 +153,10 @@ class RepeatedSessionAnalysisDialog(AppDialog):
     def last_result_path(self) -> Path | None:
         return self._last_result_path
 
+    def reject(self) -> None:
+        if not self._tasks:
+            super().reject()
+
     def _build_ui(self) -> None:
         caveat = StatusBanner(
             FIXED_ORDER_CONFOUNDING,

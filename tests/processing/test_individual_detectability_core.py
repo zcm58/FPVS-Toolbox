@@ -198,6 +198,37 @@ def test_worker_forces_png_export_with_pdf(tmp_path: Path, monkeypatch) -> None:
     assert metadata["harmonic_selection_fingerprint"] in log
 
 
+def test_projectless_run_with_only_exclusions_preserves_prior_export(tmp_path):
+    previous = tmp_path / "individual_detectability_custom_harmonics_log.txt"
+    previous.write_text("previous run", encoding="utf-8")
+    request = RunRequest(
+        input_root=tmp_path, output_root=tmp_path, project_root=None,
+        conditions=[ConditionInfo("Faces", tmp_path, [tmp_path / "P1_Faces_Results.xlsx"])],
+        output_stems={}, excluded_participants={"P1"},
+        settings=DetectabilitySettings(harmonic_source=CUSTOM_HARMONIC_SOURCE, oddball_harmonics_hz=[1.2]),
+    )
+    log = []
+    result = export_run.run_detectability_export(request, log=log.append, status=log.append, progress=log.append)
+    assert result is None
+    assert "No figures were generated" in log[-1]
+    assert list(tmp_path.iterdir()) == [previous]
+    assert previous.read_text(encoding="utf-8") == "previous run"
+
+
+def test_projectless_skipped_files_report_no_figures(tmp_path, monkeypatch):
+    request = RunRequest(
+        input_root=tmp_path, output_root=tmp_path, project_root=None,
+        conditions=[ConditionInfo("Faces", tmp_path, [tmp_path / "unreadable.xlsx"])],
+        output_stems={}, excluded_participants=set(),
+        settings=DetectabilitySettings(harmonic_source=CUSTOM_HARMONIC_SOURCE, oddball_harmonics_hz=[1.2]),
+    )
+    monkeypatch.setattr(export_run, "generate_condition_figure", lambda **_: (0, 1))
+    log = []
+    result = export_run.run_detectability_export(request, log=log.append, status=log.append, progress=lambda _: None)
+    assert result is None
+    assert "No figures were generated" in log[-1]
+
+
 def test_export_loads_processing_harmonics_before_generating_figures(
     tmp_path: Path,
     monkeypatch,
@@ -255,7 +286,7 @@ def test_export_loads_processing_harmonics_before_generating_figures(
     dataset_index = SimpleNamespace(
         manifest={},
         workbooks=tuple(
-            SimpleNamespace(path=path, participant_id=participant_id)
+            SimpleNamespace(path=path, participant_id=participant_id, condition="CondA", group_id=None)
             for path, participant_id in ((file_p1, "P1"), (file_p2, "P2"))
         ),
         excluded_workbooks=(),

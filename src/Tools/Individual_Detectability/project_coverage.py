@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,6 +43,34 @@ class ManagedProjectCoverage:
 
     by_workbook: Mapping[Path, ManagedWorkbookCoverage]
     excluded_workbooks: frozenset[Path]
+
+
+def discover_project_conditions(project_root: Path, input_root: Path) -> list[ConditionInfo]:
+    """Build separate figure selections from indexed condition and group identities."""
+    from Main_App.projects import DatasetIndexError, load_project_dataset_index
+    from .core import ConditionInfo, participant_sort_key
+
+    index = load_project_dataset_index(project_root)
+    selected_root = input_root.resolve()
+    if not selected_root.is_relative_to(index.excel_root):
+        raise DatasetIndexError(f"Choose the project's processed results folder: {index.excel_root}")
+    if index.groups:
+        index.require_group_assignments()
+    by_condition = defaultdict(list)
+    for record in index.workbooks:
+        if record.path.is_relative_to(selected_root):
+            by_condition[record.condition, record.group_id].append(record)
+    conditions = [
+        ConditionInfo(
+            name=name,
+            path=records[0].path.parent,
+            files=[record.path for record in records],
+            group=index.groups[group_id] if group_id is not None else None,
+            participant_ids=tuple(sorted({record.participant_id for record in records}, key=participant_sort_key)),
+        )
+        for (name, group_id), records in by_condition.items()
+    ]
+    return sorted(conditions, key=lambda condition: condition.display_name.casefold())
 
 
 def load_managed_project_coverage(
@@ -137,6 +166,9 @@ def select_managed_conditions(
     }
     selected: list[ConditionInfo] = []
     for condition in conditions:
+        group = condition.group
+        if group is not None and dataset_index.groups.get(group.group_id) != group:
+            raise RoiCoverageGateError("The selected project group changed. Refresh the selected inputs.")
         retained: list[Path] = []
         for workbook_path in condition.files:
             resolved = workbook_path.expanduser().resolve(strict=False)
@@ -150,6 +182,10 @@ def select_managed_conditions(
                 )
             if record.participant_id.casefold() in excluded_ids:
                 continue
+            if record.condition != condition.name or record.group_id != (group.group_id if group else None):
+                raise RoiCoverageGateError(
+                    f"The project condition or group changed for {resolved.name}. Refresh the selected inputs."
+                )
             if resolved not in allowed_paths:
                 raise RoiCoverageGateError(
                     "Individual Detectability selected a workbook outside the current "

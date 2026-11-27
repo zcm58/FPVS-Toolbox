@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Signal
 
 from .renderer import SequenceFigureResult, SequenceFigureSpec, render_sequence_figure
+
+logger = logging.getLogger(__name__)
 
 
 class SequenceFigureWorker(QObject):
@@ -23,6 +27,7 @@ class SequenceFigureWorker(QObject):
         try:
             result: SequenceFigureResult = render_sequence_figure(self._spec)
         except Exception as exc:
+            logger.exception("Sequence figure export failed.", extra={"operation": "sequence_figure_export"})
             self.failed.emit(str(exc))
             return
         self.progress.emit("Export complete.")

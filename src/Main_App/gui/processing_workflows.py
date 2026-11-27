@@ -830,7 +830,7 @@ def _handle_frequency_domain_qc_review(
 
 
 def _set_resume_post_processing_pending(host: Any, pending: bool) -> None:
-    host._frequency_domain_post_processing_resume_pending = bool(pending)
+    host._post_processing_resume_root = host.currentProject.project_root if pending else None
     button = getattr(host, "btn_start", None)
     if button is None:
         return
@@ -1969,7 +1969,7 @@ def finalize_processing(
 def on_start_stop_clicked(host: Any) -> None:
     """Handle Start/Stop button clicks with confirmation on stop."""
     if not getattr(host, "_run_active", False):
-        if getattr(host, "_frequency_domain_post_processing_resume_pending", False):
+        if getattr(host, "_post_processing_resume_root", None) is not None:
             resume_post_processing(host)
             return
         host.start_processing()

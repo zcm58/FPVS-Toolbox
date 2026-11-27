@@ -183,7 +183,11 @@ def test_missing_summary_is_not_substituted_during_comparison():
 
 
 def test_comparison_disables_single_group_export_entry_point():
-    gui.LoretaVisualizerWindow._open_export_figures(SimpleNamespace(_group_comparison_enabled=True))
+    window = SimpleNamespace(
+        renderer=object(), _comparison_figure_thread=None, _mri_render_thread=None,
+        _group_comparison_enabled=True, _descriptive_payloads=(),
+    )
+    assert not gui.LoretaVisualizerWindow._available_figure_exports(window)
 
 
 def test_mask_toggle_remains_available_when_only_second_group_has_a_mask(tmp_path):
