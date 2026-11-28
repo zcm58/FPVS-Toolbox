@@ -127,6 +127,8 @@ class PublicationMapsWindow(QWidget):
         self._last_generated_figure_count = 0
         self._pending_outcome: PublicationMapsWorkerOutcome | None = None
         self._cancel_requested = False
+        self._preview_only = False
+        self._scalp_viewer = None
         self.bca_low_color = DEFAULT_BCA_LOW_COLOR
         self.bca_high_color = DEFAULT_BCA_HIGH_COLOR
         self._dataset_index: ProjectDatasetIndex | None = None
@@ -717,6 +719,15 @@ class PublicationMapsWindow(QWidget):
         header.add_action_widget(self.scalp_maps_info_btn)
 
         form = make_form_layout()
+        self.scalp_view_combo = QComboBox(group)
+        self.scalp_view_combo.setObjectName("publication_maps_scalp_view")
+        self.scalp_view_combo.setAccessibleName("Scalp map export view")
+        self.scalp_view_combo.addItem("2D top view", "2d")
+        self.scalp_view_combo.addItem("3D front and back", "3d")
+        self.scalp_view_combo.setToolTip(
+            "The 3D figure shows the same electrode measurements on the front and back of a template scalp."
+        )
+        form.addRow("Export view:", self.scalp_view_combo)
         form.addRow("Map types:", self._build_metric_selection(group))
         layout.addLayout(form)
         self.map_settings_section = self._build_map_settings_section(group)
@@ -738,6 +749,10 @@ class PublicationMapsWindow(QWidget):
         self.run_btn.setToolTip(
             "Generate the selected scalp map figures using the current settings."
         )
+        self.view_3d_btn = make_action_button("View in 3D", parent=group)
+        self.view_3d_btn.setAccessibleName("View scalp maps in 3D")
+        self.view_3d_btn.setToolTip("Open a rotatable scalp map for the current selection.")
+        self.view_3d_btn.clicked.connect(lambda: self._start_run(preview_only=True))
         self.cancel_btn = make_action_button("Cancel", parent=group)
         self.cancel_btn.setAccessibleName("Cancel scalp map generation")
         self.cancel_btn.setEnabled(False)
@@ -747,13 +762,15 @@ class PublicationMapsWindow(QWidget):
         action_height = max(
             38,
             self.run_btn.sizeHint().height(),
+            self.view_3d_btn.sizeHint().height(),
             self.cancel_btn.sizeHint().height(),
         )
-        for control in (self.run_btn, self.cancel_btn, self.progress):
+        for control in (self.run_btn, self.view_3d_btn, self.cancel_btn, self.progress):
             control.setFixedHeight(action_height)
 
         row = ActionRow(group, alignment=Qt.AlignLeft)
         row.add_button(self.run_btn)
+        row.add_button(self.view_3d_btn)
         row.add_button(self.cancel_btn)
         row.row_layout.addWidget(self.progress, 1)
 
@@ -831,6 +848,7 @@ class PublicationMapsWindow(QWidget):
         return self._project_root or Path.home()
 
     def _on_input_root_changed(self, _text: str) -> None:
+        self._close_scalp_viewer()
         self.status_label.setVisible(True)
         self._dataset_index = None
         self._refresh_session_controls(None)
@@ -1400,7 +1418,6 @@ class PublicationMapsWindow(QWidget):
     def _update_run_state(self) -> None:
         self._update_condition_summary()
         ready = bool(self.input_root_edit.text().strip())
-        ready = ready and bool(self.output_root_edit.text().strip())
         ready = ready and self._dataset_index is not None
         ready = ready and bool(self._request_groups())
         ready = ready and bool(self._selected_conditions())
@@ -1408,8 +1425,11 @@ class PublicationMapsWindow(QWidget):
         ready = ready and self._paired_conditions_valid()
         ready = ready and self._group_comparison_valid()
         ready = ready and self._session_selection_valid()
-        ready = ready and self._output_root_validation_error() is None
-        self.run_btn.setEnabled(ready and self._thread is None and not self._busy)
+        ready = ready and self._thread is None and not self._busy
+        self.view_3d_btn.setEnabled(ready)
+        self.run_btn.setEnabled(
+            ready and bool(self.output_root_edit.text().strip()) and self._output_root_validation_error() is None
+        )
 
     def _on_output_root_changed(self, _text: str) -> None:
         validation_error = self._output_root_validation_error()
@@ -1708,6 +1728,7 @@ class PublicationMapsWindow(QWidget):
             self.metric_bca_check,
             self.metric_snr_check,
             self.metric_z_check,
+            self.scalp_view_combo,
             self.color_low_btn,
             self.color_high_btn,
             self.fixed_bca_range_check,
@@ -1766,6 +1787,7 @@ class PublicationMapsWindow(QWidget):
             widget.setEnabled(not busy)
 
         self.run_btn.setEnabled(False)
+        self.view_3d_btn.setEnabled(False)
         self.cancel_btn.setEnabled(busy)
         self._toggle_metric_range_controls()
         self._update_paired_controls_state()
@@ -1776,7 +1798,7 @@ class PublicationMapsWindow(QWidget):
         if not busy:
             self._update_run_state()
 
-    def _collect_requests(self) -> tuple[PublicationMapRequest, ...]:
+    def _collect_requests(self, *, preview_only: bool = False) -> tuple[PublicationMapRequest, ...]:
         metrics = self._selected_metrics()
         color_bounds: dict[PublicationMetric, ColorBounds] = {}
         if PublicationMetric.BCA in metrics:
@@ -1833,6 +1855,7 @@ class PublicationMapsWindow(QWidget):
                 output_root=Path(self.output_root_edit.text().strip()),
                 conditions=selected_conditions,
                 metrics=metrics,
+                scalp_view="3d" if preview_only else self.scalp_view_combo.currentData(),
                 color_bounds=color_bounds,
                 export_png=True,
                 export_pdf=True,
@@ -1859,7 +1882,7 @@ class PublicationMapsWindow(QWidget):
             for group in groups
         )
 
-    def _start_run(self) -> None:
+    def _start_run(self, *, preview_only: bool = False) -> None:
         if self.has_active_generation():
             return
         if not self._selected_conditions():
@@ -1910,16 +1933,25 @@ class PublicationMapsWindow(QWidget):
             )
             self._show_validation_error(message)
             return
-        requests = self._collect_requests()
+        requests = self._collect_requests(preview_only=preview_only)
         if not requests:
             self._show_validation_error(
                 "Refresh project data and select a canonical group before running."
             )
             return
-        output_root_error = self._output_root_validation_error()
-        if output_root_error is not None:
-            self._show_validation_error(output_root_error)
+        if not preview_only:
+            output_root_error = self._output_root_validation_error()
+            if output_root_error is not None:
+                self._show_validation_error(output_root_error)
+                return
+        try:
+            worker = PublicationMapsWorker(requests, preview_only=preview_only)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._show_validation_error(str(exc))
             return
+        self._preview_only = preview_only
+        if preview_only:
+            self._close_scalp_viewer()
         self._last_generated_figure_count = 0
         self._pending_outcome = None
         self._cancel_requested = False
@@ -1932,13 +1964,12 @@ class PublicationMapsWindow(QWidget):
             else "group-scoped generation"
         )
         self.status_label.setVisible(True)
-        self.status_label.set_text(
-            f"Starting {start_label} ({len(requests)} request(s))..."
-        )
+        self.status_label.set_text("Preparing 3D scalp maps…" if preview_only
+                                   else f"Starting {start_label} ({len(requests)} request(s))...")
         self.status_label.set_variant("info")
 
         self._thread = QThread()
-        self._worker = PublicationMapsWorker(requests)
+        self._worker = worker
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.progress.setValue)
@@ -1977,10 +2008,22 @@ class PublicationMapsWindow(QWidget):
     def shutdown(self) -> bool:
         """Request cancellation and report whether destruction must be deferred."""
 
+        self._close_scalp_viewer()
         if not self.has_active_generation():
             return False
         self._cancel_run()
         return True
+
+    def _close_scalp_viewer(self) -> None:
+        if self._scalp_viewer is not None:
+            self._scalp_viewer.close()
+
+    def _on_scalp_viewer_finished(self, _result: int) -> None:
+        self._scalp_viewer = None
+
+    def closeEvent(self, event) -> None:
+        self._close_scalp_viewer()
+        super().closeEvent(event)
 
     def _show_validation_error(self, message: str) -> None:
         self.status_label.setVisible(True)
@@ -2017,7 +2060,10 @@ class PublicationMapsWindow(QWidget):
             outcome = PublicationMapsWorkerOutcome.error(
                 "The Scalp Maps worker exited without a terminal outcome."
             )
+        elif self._preview_only and self._cancel_requested and outcome.status is PublicationMapsOutcomeStatus.SUCCESS:
+            outcome = PublicationMapsWorkerOutcome.cancelled()
         self._handle_worker_outcome(outcome)
+        self._preview_only = False
         self._last_run_was_session_grid = False
         self._cancel_requested = False
         self._last_generated_figure_count = 0
@@ -2105,6 +2151,24 @@ class PublicationMapsWindow(QWidget):
             )
 
         self.progress.setValue(100)
+        if self._preview_only:
+            try:
+                if not outcome.viewer_panels:
+                    raise ValueError("The selection contains no scalp maps to display.")
+                from Tools.Publication_Maps.scalp_viewer import ScalpSurfaceDialog
+
+                viewer = ScalpSurfaceDialog(outcome.viewer_panels, parent=self)
+                viewer.setAttribute(Qt.WA_DeleteOnClose)
+                viewer.finished.connect(self._on_scalp_viewer_finished)
+                self._scalp_viewer = viewer
+                viewer.show()
+            except Exception as exc:
+                logger.exception("Unable to open the interactive scalp viewer.")
+                self._close_scalp_viewer()
+                self._show_validation_error(f"Could not open the 3D scalp viewer. {exc}")
+                return
+            self.status_label.setVisible(False)
+            return
         if self._last_generated_figure_count <= 0:
             message = "Scalp Maps completed without publishing any figure files."
             self.status_label.set_text(message)

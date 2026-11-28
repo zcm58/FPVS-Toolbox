@@ -74,7 +74,8 @@ function Invoke-PackagedProbe {
         $report.workflows.preprocessing.fif_roundtrip_exact -ne $true -or
         $report.workflows.free_harmonic_clustering.permutations -ne 127 -or
         $report.workflows.figures.snr_png_pdf -ne $true -or
-        $report.workflows.figures.scalp_png_pdf -ne $true)) {
+        $report.workflows.figures.scalp_png_pdf -ne $true -or
+        $report.workflows.figures.scalp_3d_png_pdf -ne $true)) {
         throw "Packaged scientific workflow acceptance is incomplete. Report: $reportPath"
     }
     Write-Output "Packaged $mode smoke passed: $reportPath"

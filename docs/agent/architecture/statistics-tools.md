@@ -54,6 +54,20 @@ Primary paths:
   selected metric columns per electrode before condition-level averaging and
   transactional PNG/PDF figure export. It does not write auxiliary source-data
   workbooks.
+  The 3D option displays those same electrode aggregates on MNE's bundled
+  fsaverage outer head. Front and back views share a color scale. The BioSemi64
+  sensor directions are aligned to the template in head coordinates. Linear
+  interpolation in an azimuthal equidistant projection colors the region
+  within the finite sensors' convex hull. Gray anatomy outside that region
+  has no displayed value. Dots mark contributing electrodes visible from each
+  direction. The native PyVistaQt viewer shares the LORETA desktop OpenGL
+  check and supports rotation, zoom and pan. Switching panels retains the
+  camera. Opening the viewer writes no files. Exporting a chosen view checks
+  its source identities and managed QC release again before publishing the
+  paired PNG and PDF. This display needs neither individual MRI data nor an inverse
+  solution. Electrode-wise significance maps require separate statistical
+  results. The paper's Figure 5 distinguishes these from harmonic-sum
+  topographies. [Feuerriegel et al. (2018)](https://doi.org/10.1016/j.biopsycho.2018.09.002)
   Requested input failures are fatal rather than partial-cohort success, and
   missing montage sensors are omitted rather than converted to zero.
   Its GUI reads base frequency and BCA upper-limit values from Settings and

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
 
@@ -91,6 +91,11 @@ class PublicationMapRequest:
     export_session_grid_figure: bool = False
     session_comparison_ids: tuple[str, ...] = ()
     export_paired_session_difference: bool = False
+    scalp_view: Literal["2d", "3d"] = "2d"
+
+    def __post_init__(self) -> None:
+        if self.scalp_view not in ("2d", "3d"):
+            raise ValueError(f"Unknown scalp map view: {self.scalp_view!r}. Choose '2d' or '3d'.")
 
 
 @dataclass(frozen=True)

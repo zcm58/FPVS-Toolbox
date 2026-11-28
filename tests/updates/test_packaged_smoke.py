@@ -87,6 +87,7 @@ def test_scientific_workflow_entrypoint_runs_real_components_and_retains_artifac
     assert workflows["free_harmonic_clustering"]["artifact_count"] >= 10
     assert workflows["figures"]["snr_png_pdf"] is True
     assert workflows["figures"]["scalp_png_pdf"] is True
+    assert workflows["figures"]["scalp_3d_png_pdf"] is True
     artifacts = report.with_suffix(".artifacts")
     assert len(workflows["artifacts"]) == len([path for path in artifacts.rglob("*") if path.is_file()])
     assert any(row["path"].endswith(".pdf") for row in workflows["artifacts"])

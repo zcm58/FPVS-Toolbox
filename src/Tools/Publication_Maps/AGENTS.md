@@ -89,6 +89,15 @@ Rules:
   with numerical zero. Render only finite defined sensors, require the
   documented minimum non-collinear coverage, and exclude missing sensors from
   interpolation and color scaling.
+- **Export view** defaults to the existing 2D top view. The 3D option draws
+  front and back views of MNE's bundled generic head using the same finite
+  BioSemi64 values, metric limits and montage checks. The template and display
+  interpolation belong to the renderer. Keep electrode alignment, missing-data
+  coverage and observer orientation covered by tests. Keep 3D exports distinct
+  from 2D files for every supported figure layout. **View in 3D** opens a
+  native trackball viewer from the same qualified request without writing
+  files. Keep the camera across panel changes. Revalidate the frozen workbook
+  and release identities when publishing an interactive camera view.
 - The active Scalp Maps GUI/worker publishes figure files only. Do not create
   XLSX, CSV, JSON, or other auxiliary output artifacts. Grouped figures must
   not overwrite one another.

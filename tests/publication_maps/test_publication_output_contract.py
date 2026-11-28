@@ -753,6 +753,96 @@ def test_two_group_comparison_rejects_request_result_identity_mismatch(
         render_group_comparison_figures(results, requests)
 
 
+def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(tmp_path, monkeypatch):
+    from Tools.Publication_Maps import scalp_scene, scalp_surface, worker
+
+    root = tmp_path / "Project"
+    output = root / "4 - Scalp Maps"
+    requests = tuple(dataclasses.replace(request, scalp_view="3d", export_pdf=True)
+                     for request in _group_comparison_requests(root, output))
+    cohorts = {key: _comparison_result(key, title, scale=scale) for key, title, scale in (
+        ("clinical", "Clinical", 10.0), ("control", "Control", 1.0),
+    )}
+    for group_id, cohort in cohorts.items():
+        source = tmp_path / f"{group_id}.xlsx"
+        source.write_bytes(b"original")
+        cohort.included_workbooks = _result_with_workbook_snapshot(source).included_workbooks
+        cohort.selection_metadata["final_release_receipt_fingerprint"] = "current-release"
+    monkeypatch.setattr(worker, "build_publication_map_result",
+                        lambda request, **_: cohorts[request.group_id])
+    with monkeypatch.context() as preview_guard:
+        def unexpected_destination_access(*_, **__):
+            pytest.fail("Read-only preview touched an export destination")
+        preview_guard.setattr(worker, "request_output_root", unexpected_destination_access)
+        preview_guard.setattr(worker, "PublicationArtifactTransaction", unexpected_destination_access)
+        preview = PublicationMapsWorker(requests, preview_only=True)
+        preview.run()
+    assert preview.outcome.status is PublicationMapsOutcomeStatus.SUCCESS
+    assert not output.exists()
+    assert preview.outcome.batch_figure_paths == ()
+    panels = preview.outcome.viewer_panels
+    assert [p.title for p in panels] == ["Faces · Clinical", "Faces · Control"]
+    assert [(p.norm.vmin, p.norm.vmax) for p in panels] == [(0.0, 40.0)] * 2
+    assert [dict(zip(p.info.ch_names, p.data, strict=True))["O1"] for p in panels] == [10.0, 1.0]
+    assert all(p.output_root == output and p.input_root == requests[0].input_root for p in panels)
+    assert all(p.output_base_root == output and p.project_root == root for p in panels)
+    assert all(p.release_fingerprint == "current-release" for p in panels)
+    assert panels[0].source_workbooks is panels[1].source_workbooks
+    assert panels[0].source_workbooks == tuple(c.included_workbooks[0] for c in cohorts.values())
+
+    output.mkdir()
+    flat = output / "Faces_clinical_and_control_bca_group_comparison.png"
+    flat.write_bytes(b"prior flat figure")
+    draw_surface = scalp_surface.draw_scalp_surface
+    rendered = []
+    def capture_export(ax, data, info, *, view, cmap, norm):
+        if view == "front":
+            rendered.append((data, info.ch_names, (norm.vmin, norm.vmax)))
+        draw_surface(ax, data, info, view=view, cmap=cmap, norm=norm)
+
+    with monkeypatch.context() as export_guard:
+        export_guard.setattr(scalp_surface, "draw_scalp_surface", capture_export)
+        export_guard.setattr(scalp_scene, "build_surface_panels",
+                             lambda *_, **__: pytest.fail("File export prepared unused interactive panels"))
+        batch = PublicationMapsWorker(requests)
+        batch.run()
+    assert batch.outcome.status is PublicationMapsOutcomeStatus.SUCCESS
+    assert not batch.outcome.viewer_panels
+    assert flat.read_bytes() == b"prior flat figure"
+    assert {path.suffix for path in batch.outcome.batch_figure_paths} == {".pdf", ".png"}
+    for path in batch.outcome.batch_figure_paths:
+        assert path.stem == flat.stem + "_3d" and path.stat().st_size > 1000
+    for surface, (data, names, limits) in zip((*panels, *panels), rendered, strict=True):
+        np.testing.assert_array_equal(surface.data, data)
+        assert surface.info.ch_names == names
+        assert (surface.norm.vmin, surface.norm.vmax) == limits
+
+    panels[0].source_workbooks[1].path.write_bytes(b"edited after analysis")
+    stale = PublicationMapsWorker(requests, preview_only=True)
+    stale.run()
+    assert stale.outcome.status is PublicationMapsOutcomeStatus.ERROR
+    assert not stale.outcome.viewer_panels and not stale.outcome.batch_figure_paths
+
+
+def test_paired_surface_viewer_keeps_group_folder_and_selected_pair_order(tmp_path):
+    from Tools.Publication_Maps.scalp_scene import build_surface_panels
+
+    request = PublicationMapRequest(
+        input_root=tmp_path / "input", output_root=tmp_path / "output",
+        conditions=("Faces", "Objects", "Extra"), export_paired_figures=True,
+        paired_conditions=("Objects", "Faces"), scalp_view="3d",
+    )
+    result = _comparison_result("clinical", "Clinical", scale=1.0)
+    frame = result.grand_average_values
+    result.grand_average_values = pd.concat([
+        frame, frame.assign(condition="Objects", render_value=2.0), frame.assign(condition="Extra", render_value=100.0),
+    ])
+    panels = build_surface_panels([result], [request], cancel_check=lambda: None)
+    assert [p.title for p in panels] == ["Objects · Clinical", "Faces · Clinical"]
+    assert all(p.output_root == request.output_root / "Clinical" for p in panels)
+    assert all(p.norm.vmax == 4.0 for p in panels)
+
+
 def _group_comparison_requests(
     project_root: Path,
     output_root: Path,

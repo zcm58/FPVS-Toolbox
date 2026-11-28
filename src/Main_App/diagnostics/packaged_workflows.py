@@ -150,6 +150,8 @@ def free_harmonic_probe(root: Path) -> dict[str, object]:
 
 
 def figure_probe(root: Path) -> dict[str, object]:
+    from dataclasses import replace
+
     import numpy as np
     import pandas as pd
 
@@ -177,12 +179,16 @@ def figure_probe(root: Path) -> dict[str, object]:
                           "map_label": ["Synthetic BCA"] * 64, "electrode": BIOSEMI64_CHANNELS,
                           "render_value": np.linspace(0.1, 1.0, 64), "is_montage_electrode": [True] * 64})
     result = PublicationMapResult(long_values=pd.DataFrame(), grand_average_values=grand)
-    paths = render_publication_figures(result, PublicationMapRequest(
+    request = PublicationMapRequest(
         input_root=input_root, output_root=root / "4 - Scalp Maps", conditions=("Synthetic",),
         project_root=root, metrics=(PublicationMetric.BCA,),
-    ))
+    )
+    paths = render_publication_figures(result, request)
     _check({path.suffix for path in paths} == {".pdf", ".png"}, "Synthetic scalp export omitted a figure format.")
-    return {"snr_png_pdf": True, "scalp_png_pdf": True, "scalp_channels": 64,
+    head_paths = render_publication_figures(result, replace(request, scalp_view="3d"))
+    _check({path.suffix for path in head_paths} == {".pdf", ".png"} and set(paths).isdisjoint(head_paths),
+           "Synthetic 3D scalp export must produce its own PNG and PDF.")
+    return {"snr_png_pdf": True, "scalp_png_pdf": True, "scalp_3d_png_pdf": True, "scalp_channels": 64,
             "scope": "synthetic workbook SNR export and prepared-value scalp rendering"}
 
 

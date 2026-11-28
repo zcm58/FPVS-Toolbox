@@ -16,16 +16,18 @@ from Tools.Publication_Maps.models import (
     ColorBounds,
     PublicationMapInputError,
     PublicationMapRequest,
+    PublicationMetric,
 )
 from Tools.Publication_Maps.output_contract import PublicationArtifactTransaction
 from Tools.Publication_Maps.rendering import (
     _add_missing_note,
     _draw_topomap,
+    _metric_limits,
     _save_figure,
     _style_colorbar,
     colormap_for_metric,
+    figure_stem,
     plt,
-    sanitize_filename_stem,
 )
 from Tools.Publication_Maps.session_panels import (
     PairedSessionDifferenceMap,
@@ -117,9 +119,15 @@ def _main_vlim(
     panel_set: SessionMapPanelSet,
     bounds: ColorBounds,
 ) -> tuple[float, float]:
+    if panel_set.metric is PublicationMetric.Z_SCORE:
+        return _metric_limits(np.array([panel_set.common_vmax]), metric=panel_set.metric, bounds=bounds)
     if not bounds.auto_scale and bounds.vmin is not None and bounds.vmax is not None:
         return float(bounds.vmin), float(bounds.vmax)
     return panel_set.common_vmin, panel_set.common_vmax
+
+
+def _difference_limit(panel_set: SessionMapPanelSet) -> float:
+    return max(abs(float(panel_set.difference_vmin or 0)), abs(float(panel_set.difference_vmax or 0))) or 1.0
 
 
 def _group_column_divider_x(axes) -> float:
@@ -557,6 +565,7 @@ def _render_session_panel_set(
                     cmap=cmap,
                     bounds=bounds,
                     vlim_override=main_vlim,
+                    scalp_view=request.scalp_view,
                 )
                 _center_topomap_vertical_view(ax)
                 main_images.append(image)
@@ -573,12 +582,7 @@ def _render_session_panel_set(
         _style_colorbar(main_cbar, metric=metric)
 
         if include_difference:
-            difference_limit = max(
-                abs(float(panel_set.difference_vmin or 0.0)),
-                abs(float(panel_set.difference_vmax or 0.0)),
-            )
-            if difference_limit <= 0:
-                difference_limit = 1.0
+            difference_limit = _difference_limit(panel_set)
             difference_images = []
             for column, group_id in enumerate(panel_set.group_ids):
                 if cancel_check is not None:
@@ -592,6 +596,7 @@ def _render_session_panel_set(
                     cmap=plt.get_cmap("RdBu_r"),
                     bounds=ColorBounds(),
                     vlim_override=(-difference_limit, difference_limit),
+                    scalp_view=request.scalp_view,
                 )
                 _center_topomap_vertical_view(ax)
                 difference_images.append(image)
@@ -690,7 +695,7 @@ def render_session_grid_figures(
                 f"{panel_set.condition}_{group_stem}_"
                 f"{panel_set.metric.value}_session_grid"
             )
-            stem = sanitize_filename_stem(raw_stem)
+            stem = figure_stem(raw_stem, request.scalp_view)
             prior = seen_stems.get(stem.casefold())
             if prior is not None:
                 raise PublicationMapInputError(

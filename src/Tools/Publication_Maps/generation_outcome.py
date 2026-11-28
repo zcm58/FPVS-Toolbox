@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from Tools.Publication_Maps.models import PublicationMapResult
+    from Tools.Publication_Maps.scalp_scene import ScalpSurfacePanel
 
 
 class PublicationMapGenerationCancelled(RuntimeError):
@@ -33,6 +34,7 @@ class PublicationMapsWorkerOutcome:
     batch_figure_paths: tuple[Path, ...] = ()
     message: str = ""
     project_root: str | None = None
+    viewer_panels: tuple[ScalpSurfacePanel, ...] = ()
 
     @classmethod
     def success(
@@ -40,11 +42,13 @@ class PublicationMapsWorkerOutcome:
         results: tuple[PublicationMapResult, ...],
         *,
         batch_figure_paths: tuple[Path, ...] = (),
+        viewer_panels: tuple[ScalpSurfacePanel, ...] = (),
     ) -> PublicationMapsWorkerOutcome:
         return cls(
             status=PublicationMapsOutcomeStatus.SUCCESS,
             results=results,
             batch_figure_paths=batch_figure_paths,
+            viewer_panels=viewer_panels,
         )
 
     @classmethod

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
+    QDialog,
     QDialogButtonBox,
     QLabel,
     QMainWindow,
@@ -200,6 +202,7 @@ def test_all_groups_builds_separate_canonical_requests(
 
     assert page.group_combo.currentData() == publication_maps_gui.ALL_GROUPS_VALUE
     requests = page._collect_requests()
+    assert all(request.scalp_view == "2d" for request in requests)
 
     assert [request.group_id for request in requests] == ["clinical", "control"]
     assert [request.group_label for request in requests] == ["Clinical", "Control"]
@@ -315,13 +318,15 @@ def test_group_comparison_requires_condition_records_in_both_groups(
 
 
 @pytest.mark.qt
+@pytest.mark.parametrize("size", [(1200, 800), (1280, 900)])
 def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     qtbot,
     monkeypatch,
     tmp_path,
+    size,
 ) -> None:
     host, page = _build_page(qtbot, monkeypatch, tmp_path)
-    host.setFixedSize(1280, 900)
+    host.setFixedSize(*size)
     page._set_all_conditions(False)
     page.conditions_list.item(0).setCheckState(Qt.Checked)
     page.group_comparison_check.setChecked(True)
@@ -344,6 +349,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     advanced_page = page.workflow_tabs.widget(1)
     for widget in (
         page.conditions_list,
+        page.scalp_view_combo,
         page.metric_bca_check,
         page.color_low_btn,
         page.fixed_bca_range_check,
@@ -352,6 +358,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
         page.status_label,
         page.progress,
         page.run_btn,
+        page.view_3d_btn,
         page.scalp_maps_info_btn,
     ):
         assert generation_page.isAncestorOf(widget)
@@ -379,6 +386,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     qtbot.waitUntil(lambda: not page.run_btn.visibleRegion().isEmpty())
     for widget in (
         page.conditions_list,
+        page.scalp_view_combo,
         page.metric_bca_check,
         page.color_low_btn,
         page.fixed_bca_range_check,
@@ -386,6 +394,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
         page.z_threshold_spin,
         page.status_label,
         page.run_btn,
+        page.view_3d_btn,
         page.cancel_btn,
         page.progress,
         page.scalp_maps_info_btn,
@@ -423,7 +432,7 @@ def test_scalp_maps_tabs_fit_supported_workspace_without_page_scroll(
     )
 
     def assert_advanced_controls_fit() -> None:
-        assert host.size().toTuple() == (1280, 900)
+        assert host.size().toTuple() == size
         for widget in advanced_controls:
             name = widget.objectName() or type(widget).__name__
             assert not widget.rect().isEmpty(), name
@@ -887,6 +896,81 @@ def test_output_inside_excel_root_is_rejected_before_worker_start(
 
 
 @pytest.mark.qt
+def test_view_in_3d_opens_current_selection_without_a_valid_export_folder(qtbot, monkeypatch, tmp_path):
+    prepared = []
+    opened = []
+
+    class PreviewWorker(QObject):
+        progress = Signal(int)
+        message = Signal(str)
+        finished = Signal(object)
+
+        def __init__(self, requests, *, preview_only):
+            super().__init__()
+            assert preview_only
+            assert all(request.scalp_view == "3d" for request in requests)
+            self.panels = tuple(request.conditions for request in requests)
+            prepared.append(self.panels)
+
+        def run(self):
+            self.outcome = PublicationMapsWorkerOutcome.success((), viewer_panels=self.panels)
+            self.finished.emit(self.outcome)
+
+    class ViewerDialog(QDialog):
+        def __init__(self, panels, *, parent):
+            super().__init__(parent)
+            opened.append(panels)
+
+    monkeypatch.setattr(publication_maps_gui, "PublicationMapsWorker", PreviewWorker)
+    monkeypatch.setitem(sys.modules, "Tools.Publication_Maps.scalp_viewer",
+                        SimpleNamespace(ScalpSurfaceDialog=ViewerDialog))
+    monkeypatch.setattr(publication_maps_gui, "confirm", lambda *_: pytest.fail("Preview offered to open the output folder"))
+    host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    page.output_root_edit.setText(page.input_root_edit.text())
+    assert not page.run_btn.isEnabled()
+    assert page.view_3d_btn.isEnabled()
+    assert page.scalp_view_combo.currentData() == "2d"
+    for i in range(2):
+        qtbot.mouseClick(page.view_3d_btn, Qt.LeftButton)
+        qtbot.waitUntil(lambda: page._scalp_viewer is not None and page._scalp_viewer.isVisible())
+        assert not page._scalp_viewer.isModal()
+        assert not page.has_active_generation()
+        if i == 0:
+            page._set_all_conditions(False)
+            page.conditions_list.item(0).setCheckState(Qt.Checked)
+    assert prepared == opened
+    assert prepared[0] != prepared[1]
+    assert page.scalp_view_combo.currentData() == "2d"
+    assert not (host.currentProject.project_root / "4 - Scalp Maps").exists()
+    page.shutdown()
+    assert page._scalp_viewer is None
+
+
+@pytest.mark.qt
+def test_viewer_graphics_failure_leaves_figure_generation_available(qtbot, monkeypatch, tmp_path):
+    from Tools.Publication_Maps import scalp_viewer
+
+    def unavailable(_parent):
+        raise RuntimeError("Interactive 3D rendering requires desktop OpenGL 3.2 or later.")
+
+    monkeypatch.setattr(scalp_viewer, "require_desktop_opengl", unavailable)
+    host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    page._set_busy_state(True)
+    page._preview_only = True
+    page._pending_outcome = PublicationMapsWorkerOutcome.success(
+        (), viewer_panels=(SimpleNamespace(label="Faces · BCA"),)
+    )
+    with qtbot.waitSignal(page.generation_idle):
+        page._cleanup_worker()
+
+    assert "desktop OpenGL 3.2" in page.status_label.text()
+    assert page.status_label.property("statusVariant") == "error"
+    assert page._scalp_viewer is None
+    assert page.run_btn.isEnabled() and page.view_3d_btn.isEnabled()
+    assert host.menuBar().isEnabled()
+
+
+@pytest.mark.qt
 def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
     qtbot,
     monkeypatch,
@@ -898,9 +982,10 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         finished = Signal(object)
         instances: list[ControlledWorker] = []
 
-        def __init__(self, requests) -> None:
+        def __init__(self, requests, *, preview_only=False) -> None:
             super().__init__()
             self.requests = tuple(requests)
+            assert not preview_only
             self.started = threading.Event()
             self.cancel_requested = threading.Event()
             self.allow_finish = threading.Event()
@@ -942,6 +1027,7 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
     )
     assert page.status_label.isVisible() is False
 
+    page.scalp_view_combo.setCurrentIndex(page.scalp_view_combo.findData("3d"))
     page._start_run()
     qtbot.waitUntil(lambda: bool(ControlledWorker.instances), timeout=2000)
     worker = ControlledWorker.instances[0]
@@ -949,6 +1035,8 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
 
     try:
         assert page.has_active_generation()
+        assert [request.scalp_view for request in worker.requests] == ["3d", "3d"]
+        assert not page.scalp_view_combo.isEnabled()
         assert page.run_btn.isEnabled() is False
         assert page.cancel_btn.isEnabled() is True
         assert page.view_generation_log_btn.isEnabled() is True
@@ -972,6 +1060,8 @@ def test_cancel_keeps_busy_and_navigation_locked_until_worker_exit(
         qtbot.waitUntil(lambda: not page.has_active_generation(), timeout=3000)
 
         assert page.run_btn.isEnabled() is True
+        assert page.scalp_view_combo.isEnabled()
+        assert page.scalp_view_combo.currentData() == "3d"
         assert page.cancel_btn.isEnabled() is False
         assert page.view_generation_log_btn.isEnabled() is True
         assert host.menuBar().isEnabled() is True

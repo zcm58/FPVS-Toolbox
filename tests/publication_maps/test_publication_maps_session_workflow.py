@@ -726,6 +726,52 @@ def test_session_grid_project_requires_every_selected_condition_cell(
         )
 
 
+@pytest.mark.parametrize("maximum, expected_maximum", [(3.0, 3.0), (1.25, 3.0)])
+def test_session_z_scale_uses_threshold_when_upper_bound_is_automatic(maximum, expected_maximum):
+    from Tools.Publication_Maps.models import ColorBounds
+
+    panel_set = SimpleNamespace(metric=PublicationMetric.Z_SCORE, common_vmin=-3.0, common_vmax=maximum)
+    assert session_rendering._main_vlim(panel_set, ColorBounds(vmin=2.0)) == (2.0, expected_maximum)
+
+
+@pytest.mark.parametrize("preview_only", [False, True])
+def test_surface_session_grid_aggregates_once_per_export_or_preview(tmp_path, monkeypatch, preview_only):
+    from unittest.mock import Mock
+    from Tools.Publication_Maps import scalp_scene
+
+    index = _repeated_index(tmp_path)
+    requests = tuple(replace(request, scalp_view="3d", export_pdf=False, png_dpi=72)
+                     for request in _session_requests(tmp_path))
+    results = _session_results_for_records(index.workbooks, requests)
+    for result in results:
+        source = result.long_values
+        result.long_values = pd.concat([source.assign(electrode=name) for name in ("Fz", "Cz", "O1", "O2")])
+    monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *args, **kwargs: index)
+    monkeypatch.setattr(publication_worker, "build_publication_map_result",
+                        lambda request, **_: next(result for result in results if result.group_id == request.group_id))
+    aggregate = Mock(wraps=build_session_panel_sets)
+    monkeypatch.setattr(session_rendering, "build_session_panel_sets", aggregate)
+    monkeypatch.setattr(scalp_scene, "build_session_panel_sets", aggregate)
+    worker = publication_worker.PublicationMapsWorker(requests, preview_only=preview_only)
+    worker.run()
+    assert worker.outcome.status is PublicationMapsOutcomeStatus.SUCCESS, worker.outcome.message
+    aggregate.assert_called_once()
+    if not preview_only:
+        figure, = worker.outcome.batch_figure_paths
+        assert figure.name.endswith("_session_grid_3d.png") and figure.is_file()
+        assert not worker.outcome.viewer_panels
+        return
+    assert not worker.outcome.batch_figure_paths
+    panels = worker.outcome.viewer_panels
+    assert len(panels) == 6 and len({p.label for p in panels}) == 6
+    assert all(p.output_root == requests[0].output_root for p in panels)
+    assert len({(p.norm.vmin, p.norm.vmax) for p in panels[:4]}) == 1
+    for panel in panels[4:]:
+        assert " − " in panel.title
+        assert panel.cmap.name == "RdBu_r" and panel.norm.vmin == -panel.norm.vmax
+        assert len(set(panel.data)) == 1 and abs(panel.data[0]) == 2
+
+
 def test_session_renderer_queues_each_selected_condition_output_pair(
     tmp_path: Path,
     monkeypatch,

@@ -16,6 +16,11 @@ conditions using the significant-harmonic list saved when processing completed.
 <p>
 Open a managed project, choose one canonical group (or All groups for separate
 group outputs), then select conditions and map types on the Generate Maps tab.
+Choose <strong>View in 3D</strong> to rotate and zoom the selected maps.
+Choose <strong>3D front and back</strong> under Export view to show the same
+BioSemi64 electrode values on a template scalp. Both views use one color scale.
+The color between electrodes is interpolated. Estimating activity inside the
+brain requires a separate source analysis.
 That tab keeps map appearance and ranges, generation status, progress, the
 tool information action, and <strong>Generate Scalp Maps</strong> together.
 BCA uses automatic limits until you explicitly enable its fixed range.

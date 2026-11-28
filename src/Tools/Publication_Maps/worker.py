@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -57,6 +58,7 @@ class PublicationMapsWorker(QObject):
     def __init__(
         self,
         requests: PublicationMapRequest | Sequence[PublicationMapRequest],
+        *, preview_only: bool = False,
     ) -> None:
         super().__init__()
         if isinstance(requests, PublicationMapRequest):
@@ -65,6 +67,9 @@ class PublicationMapsWorker(QObject):
             normalized = tuple(requests)
         if not normalized:
             raise ValueError("Scalp Maps requires at least one generation request.")
+        if preview_only and normalized[0].scalp_view != "3d":
+            raise ValueError("Choose a 3D scalp surface for the interactive viewer.")
+        self._preview_only = preview_only
         baseline = replace(
             normalized[0],
             group_id=None,
@@ -95,14 +100,15 @@ class PublicationMapsWorker(QObject):
             raise ValueError(
                 "Multi-request Scalp Maps batches require unique canonical group IDs."
             )
-        output_targets = [
-            str(request_output_root(request).resolve(strict=False)).casefold()
-            for request in normalized
-        ]
-        if len(set(output_targets)) != len(output_targets):
-            raise ValueError(
-                "Scalp Maps group requests require unique output directories."
-            )
+        if not preview_only:
+            output_targets = [
+                str(request_output_root(request).resolve(strict=False)).casefold()
+                for request in normalized
+            ]
+            if len(set(output_targets)) != len(output_targets):
+                raise ValueError(
+                    "Scalp Maps group requests require unique output directories."
+                )
         self._group_comparison_enabled = validate_group_comparison_requests(normalized)
         self._session_grid_enabled = validate_session_grid_requests(normalized)
         self.requests = normalized
@@ -115,6 +121,7 @@ class PublicationMapsWorker(QObject):
         outcome: PublicationMapsWorkerOutcome
         results: list[PublicationMapResult] = []
         batch_figure_paths = ()
+        viewer_panels = ()
         try:
             self._cancellation_checkpoint()
             if self._group_comparison_enabled:
@@ -123,10 +130,11 @@ class PublicationMapsWorker(QObject):
             if self._session_grid_enabled:
                 validate_session_grid_project(self.requests)
                 self._cancellation_checkpoint()
-            with PublicationArtifactTransaction(self.request) as transaction:
+            with (nullcontext() if self._preview_only else PublicationArtifactTransaction(self.request)) as transaction:
                 for index, request in enumerate(self.requests):
                     self._cancellation_checkpoint()
-                    transaction.ensure_request_target(request)
+                    if transaction is not None:
+                        transaction.ensure_request_target(request)
                     group_label = request.group_label or "Ungrouped dataset"
                     self._emit_phase_progress(index, 5)
                     self.message.emit(f"[{group_label}] Reading indexed workbooks...")
@@ -136,6 +144,10 @@ class PublicationMapsWorker(QObject):
                     )
                     self._cancellation_checkpoint()
 
+                    if self._preview_only:
+                        results.append(result)
+                        self._emit_phase_progress(index, 70)
+                        continue
                     if self._group_comparison_enabled or self._session_grid_enabled:
                         results.append(result)
                         self._emit_phase_progress(index, 70)
@@ -166,7 +178,13 @@ class PublicationMapsWorker(QObject):
                     self._emit_phase_progress(index, 95)
                     self.message.emit(f"[{group_label}] Figure output staged.")
 
-                if self._group_comparison_enabled:
+                if self._preview_only:
+                    from Tools.Publication_Maps.scalp_scene import build_surface_panels
+                    viewer_panels = build_surface_panels(
+                        results, self.requests, cancel_check=self._cancellation_checkpoint,
+                    )
+
+                if self._group_comparison_enabled and transaction is not None:
                     self._cancellation_checkpoint()
                     self.progress.emit(90)
                     self.message.emit(
@@ -189,7 +207,7 @@ class PublicationMapsWorker(QObject):
                     self.progress.emit(96)
                     self.message.emit("Comparison figure output staged.")
 
-                if self._session_grid_enabled:
+                if self._session_grid_enabled and transaction is not None:
                     self._cancellation_checkpoint()
                     self.progress.emit(90)
                     self.message.emit(
@@ -216,13 +234,16 @@ class PublicationMapsWorker(QObject):
                         result.included_workbooks,
                         cancel_check=self._cancellation_checkpoint,
                     )
-                self.message.emit("Publishing the complete Scalp Maps figure set...")
-                transaction.commit(cancel_check=self._cancellation_checkpoint)
+                self._cancellation_checkpoint()
+                if transaction is not None:
+                    self.message.emit("Publishing the complete Scalp Maps figure set...")
+                    transaction.commit(cancel_check=self._cancellation_checkpoint)
 
             self.progress.emit(100)
             outcome = PublicationMapsWorkerOutcome.success(
                 tuple(results),
                 batch_figure_paths=batch_figure_paths,
+                viewer_panels=viewer_panels,
             )
         except PublicationMapGenerationCancelled:
             logger.info(

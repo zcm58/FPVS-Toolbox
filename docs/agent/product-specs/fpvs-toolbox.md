@@ -71,7 +71,15 @@ Offline retries use the same revision. [Reporting ownership and verification](..
   and numerical companions. Historical workbook readers and Excel report
   formats remain supported. SNR Plots and Free Harmonic Clustering are enabled
   by default. Scalp Maps and LORETA Visualizer require the Beta Tools setting,
-  save and restart, and the first-open notice in each session. Current LORETA
+  save and restart, and the first-open notice in each session. In **Tools →
+  Beta Tools → Scalp Maps**, **View in 3D** opens the selected BioSemi64
+  electrode maps on a rotatable head. Drag to rotate, scroll to zoom, and
+  Shift-drag to pan. Switch maps to compare them from the same angle. Use
+  **Export view…** in the viewer to save that angle as PNG and PDF, or choose
+  **3D front and back** under **Export view** on the Generate Maps page for
+  standardized views. The default 2D map and both 3D outputs use the same
+  electrode measurements.
+  Current LORETA
   generation requires eligible source-ready derivatives and current harmonics.
   Analysis workbooks finish independently. On first open, LORETA prepares any
   required source maps for eligible single-session projects and shows build

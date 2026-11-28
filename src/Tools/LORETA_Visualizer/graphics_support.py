@@ -6,7 +6,7 @@ from typing import Any
 
 
 _REQUIREMENT = (
-    "LORETA 3D rendering requires desktop OpenGL 3.2 or later. "
+    "Interactive 3D rendering requires desktop OpenGL 3.2 or later. "
     "Update your graphics driver or use a supported graphics session."
 )
 
