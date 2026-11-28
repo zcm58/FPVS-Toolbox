@@ -214,6 +214,22 @@ def test_all_groups_builds_separate_canonical_requests(
 
 
 @pytest.mark.qt
+def test_stacked_export_follows_selected_pair(qtbot, monkeypatch, tmp_path):
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    page.paired_figures_check.setChecked(True)
+    combo = page.scalp_view_combo
+    index = combo.findData("stacked_pair")
+    assert combo.model().item(index).isEnabled()
+    combo.setCurrentIndex(index)
+    for request in page._collect_requests():
+        assert request.scalp_view == "stacked_pair"
+        assert request.paired_conditions == page._selected_paired_conditions()
+    page.paired_figures_check.setChecked(False)
+    assert not combo.model().item(index).isEnabled()
+    assert combo.currentData() == "2d"
+
+
+@pytest.mark.qt
 def test_color_swatches_follow_export_view_and_keep_custom_endpoint(qtbot, monkeypatch, tmp_path):
     from PySide6.QtGui import QColor
     from Tools.Publication_Maps.colormaps import scalp_color_endpoints

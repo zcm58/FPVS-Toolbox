@@ -92,12 +92,18 @@ class PublicationMapRequest:
     export_session_grid_figure: bool = False
     session_comparison_ids: tuple[str, ...] = ()
     export_paired_session_difference: bool = False
-    scalp_view: Literal["2d", "3d", "3d_2d"] = "2d"
+    scalp_view: Literal["2d", "3d", "3d_2d", "stacked_pair"] = "2d"
     display_montage: DisplayMontage | str | Path | None = None
 
     def __post_init__(self) -> None:
-        if self.scalp_view not in ("2d", "3d", "3d_2d"):
-            raise ValueError(f"Unknown scalp map view: {self.scalp_view!r}. Choose '2d', '3d' or '3d_2d'.")
+        if self.scalp_view == "stacked_pair" and (
+            not self.export_paired_figures or self.export_session_grid_figure or self.export_group_comparison_figure
+            or len(self.paired_conditions) != 2 or len(set(self.paired_conditions)) != 2
+            or not set(self.paired_conditions).issubset(self.conditions)
+        ):
+            raise ValueError("Stacked views require two distinct selected conditions in paired-condition mode.")
+        if self.scalp_view not in ("2d", "3d", "3d_2d", "stacked_pair"):
+            raise ValueError(f"Unknown scalp map view: {self.scalp_view!r}.")
 
 
 @dataclass(frozen=True)

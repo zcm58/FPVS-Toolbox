@@ -755,6 +755,7 @@ class PublicationMapsWindow(QWidget):
         self.scalp_view_combo.addItem("2D top view", "2d")
         self.scalp_view_combo.addItem("3D front and back", "3d")
         self.scalp_view_combo.addItem("3D back + 2D top", "3d_2d")
+        self.scalp_view_combo.addItem("Paired columns · 2D top, 3D front and back", "stacked_pair")
         self.scalp_view_combo.setToolTip(
             "The combined view uses cubic interpolation for 2D and natural-neighbor interpolation for 3D. "
             "Both use the same electrode values and color scale."
@@ -1535,6 +1536,12 @@ class PublicationMapsWindow(QWidget):
         self.paired_conditions_widget.setVisible(
             checked and not self._session_comparison_active()
         )
+        if hasattr(self, "scalp_view_combo"):
+            index = self.scalp_view_combo.findData("stacked_pair")
+            available = checked and selected_count >= 2 and not self._session_comparison_active()
+            self.scalp_view_combo.model().item(index).setEnabled(available)
+            if not available and self.scalp_view_combo.currentIndex() == index:
+                self.scalp_view_combo.setCurrentIndex(0)
         self.paired_condition_a_combo.setEnabled(enabled)
         self.paired_condition_b_combo.setEnabled(enabled)
 
@@ -1707,7 +1714,8 @@ class PublicationMapsWindow(QWidget):
         return bool(first and second and first != second and first in selected and second in selected)
 
     def _current_color_endpoints(self) -> tuple[str, str]:
-        return scalp_color_endpoints(self.scalp_view_combo.currentData(), self.bca_low_color, self.bca_high_color)
+        view = self.scalp_view_combo.currentData()
+        return scalp_color_endpoints("2d" if view == "stacked_pair" else view, self.bca_low_color, self.bca_high_color)
 
     def _apply_bca_color_button_styles(self) -> None:
         low, high = self._current_color_endpoints()

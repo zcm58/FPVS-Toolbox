@@ -20,6 +20,9 @@ Choose <strong>View in 3D</strong> to rotate and zoom the selected maps.
 Choose <strong>3D front and back</strong> under Export view to show the same
 electrode values on a generic head, or <strong>3D back + 2D top</strong> to
 compare the two projections with one color scale. Dots mark contributing electrodes.
+For a two-column figure, check two conditions and choose their left-to-right order under
+<strong>Advanced Settings → Figure layout</strong>. Select <strong>Paired columns · 2D top,
+3D front and back</strong> under Export view. Each metric gets a shared scale below both columns.
 In 3D, Sibson natural-neighbor interpolation blends values according to the spacing
 of nearby electrodes. Gray skin lies outside electrode coverage. Every 2D
 top view uses cubic interpolation, which can draw peaks beyond the outermost

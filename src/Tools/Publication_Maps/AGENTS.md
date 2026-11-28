@@ -153,6 +153,9 @@ Rules:
   combined figure: BCA on the first row, SNR on the second row, and, when
   selected, Z Score on the third row, with condition titles only above the first
   row.
+- The paired stacked export writes one figure per selected metric. Condition A
+  and B are the columns, with cubic top, 3D front and 3D back rows. Use bold
+  headings, the classic top-map palette, and a single horizontal bottom scale.
 - Paired-condition export is paired-only and is the GUI default: when it is
   enabled, render only the combined paired `.png` and `.pdf`, not individual
   condition figures.

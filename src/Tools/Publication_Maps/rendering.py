@@ -709,7 +709,7 @@ def _assert_unique_figure_stems(
     if request.export_paired_figures:
         pairs = _paired_condition_pairs(request, set(grand["condition"]))
         metrics = _request_metrics(request)
-        if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
+        if request.scalp_view != "stacked_pair" and PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
             ordered = tuple(
                 metric
                 for metric in COMBINED_PAIRED_METRIC_ORDER
@@ -844,7 +844,7 @@ def _render_paired_condition_figures(
         return []
 
     metrics = _request_metrics(request)
-    if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
+    if request.scalp_view != "stacked_pair" and PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
         return _render_combined_paired_condition_figures(
             result,
             request,
@@ -972,6 +972,48 @@ def _pair_group(
     return group
 
 
+def _render_stacked_pair(frames, titles, geometry, metric, bounds, output_path, dpi, cancel_check):
+    """Two condition columns with cubic tops and natural-neighbor front/back views."""
+    from textwrap import fill
+    from Tools.Publication_Maps.scalp_surface import draw_scalp_surface, prepare_scalp_surface_pair
+
+    panels = [align_render_values(frame, geometry=geometry) for frame in frames]
+    vlim = _metric_limits(np.concatenate([panel[0] for panel in panels]), metric=metric, bounds=bounds)
+    norm = matplotlib.colors.Normalize(*vlim)
+    cmap = colormap_for_metric(metric, bounds, scalp_view="2d")
+    fig = plt.figure(figsize=(6.1, 9.8), dpi=dpi)
+    try:
+        for x, title, (data, info, missing, _) in zip((.27, .73), titles, panels, strict=True):
+            _checkpoint(cancel_check)
+            label = fill(title, width=23)
+            if missing:
+                label += f"\n({missing} missing)"
+            style = figure_text_kwargs("condition_label")
+            style.update(fontsize=15 if "\n" not in label else 10, fontweight="bold")
+            fig.text(x, .981, label, ha="center", va="top", **style)
+            top, front, back = [fig.add_axes([x - .204, y, .408, height])
+                                for y, height in ((.696, .243), (.389, .289), (.084, .289))]
+            _plot_topomap_compat(data=data, info=info, ax=top, cmap=cmap, vlim=vlim)
+            prepare_scalp_surface_pair(info, front, back)
+            for ax, view in ((front, "front"), (back, "back")):
+                _checkpoint(cancel_check)
+                draw_scalp_surface(ax, data, info, view=view, cmap=cmap, norm=norm)
+        ticks = np.linspace(*vlim, 5)
+        bar = fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), cax=fig.add_axes([.235, .053, .53, .012]),
+                           orientation="horizontal", ticks=ticks, extend=_colorbar_extend(metric))
+        if len({f"{value:.2f}" for value in ticks}) == len(ticks):
+            bar.set_ticks(ticks, labels=[f"{value:.2f}" for value in ticks])
+        bar.outline.set_visible(False)
+        bar.ax.tick_params(length=0, labelsize=10, pad=3)
+        for tick in bar.ax.get_xticklabels():
+            tick.set_fontweight("bold")
+        bar.set_label("µV" if metric is PublicationMetric.BCA else colorbar_label_for_metric(metric),
+                      fontsize=11, fontweight="bold", labelpad=1)
+        _save_figure(fig, output_path, dpi=dpi, cancel_check=cancel_check)
+    finally:
+        plt.close(fig)
+
+
 def _render_paired_topomap(
     first_values: pd.DataFrame,
     second_values: pd.DataFrame,
@@ -989,6 +1031,10 @@ def _render_paired_topomap(
     scalp_view: str = "2d",
 ) -> None:
     _checkpoint(cancel_check)
+    if scalp_view == "stacked_pair":
+        _render_stacked_pair((first_values, second_values), (first_title, second_title), geometry,
+                             metric, bounds, output_path, dpi, cancel_check)
+        return
     if scalp_view == "3d":
         layout_style = _surface_layout(layout_style)
     elif scalp_view == "3d_2d":
@@ -1399,7 +1445,7 @@ def sanitize_filename_stem(value: str) -> str:
 def figure_stem(raw_stem: str, scalp_view: str) -> str:
     """Keep paired surface exports distinct from the established flat outputs."""
     stem = sanitize_filename_stem(raw_stem)
-    if scalp_view in ("3d", "3d_2d"):
+    if scalp_view in ("3d", "3d_2d", "stacked_pair"):
         return f"{stem}_{scalp_view}"
     if scalp_view == "2d":
         return stem

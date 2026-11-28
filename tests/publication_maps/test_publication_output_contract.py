@@ -906,6 +906,7 @@ def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
 
 @pytest.mark.parametrize(("view", "paired", "multi_metric"), [
     ("2d", False, False), ("2d", True, True), ("3d", True, False), ("3d", True, True),
+    ("stacked_pair", True, True), ("stacked_pair", True, False),
     ("3d_2d", False, False), ("3d_2d", True, False), ("3d_2d", True, True),
 ])
 def test_named_montage_reaches_each_ordinary_and_paired_figure(
@@ -947,12 +948,41 @@ def test_named_montage_reaches_each_ordinary_and_paired_figure(
         monkeypatch.setattr(scalp_surface, "draw_scalp_surface", capture)
     paths = rendering.render_publication_figures(result, request)
     assert paths and all(path.is_file() and path.parent.name == "Clinical" for path in paths)
+    if view == "stacked_pair":
+        assert len(paths) == len(metrics)
+        assert all(path.stem.endswith("_paired_stacked_pair") for path in paths)
+        assert len(seen) == 4 * len(metrics)
     assert seen and all(channels == names for channels in seen)
     panels = build_surface_panels([result], [dataclasses.replace(request, scalp_view="3d")], cancel_check=lambda: None)
     assert len(panels) == len(conditions) * len(metrics)
     for panel in panels:
         assert tuple(panel.info.ch_names) == names
         np.testing.assert_array_equal(panel.data, [1.0, 2.0, 3.0, 4.0])
+
+
+def test_stacked_pair_has_ordered_columns_and_one_bottom_scale(tmp_path, monkeypatch):
+    from Tools.Publication_Maps import rendering
+
+    result = _comparison_result("clinical", "Clinical", scale=1.0)
+    frame = result.grand_average_values
+    captured = []
+    monkeypatch.setattr(rendering, "_save_figure", lambda fig, *a, **kw: captured.append(fig))
+    rendering._render_stacked_pair(
+        (frame, frame), ("Left", "Right"), result.geometry, PublicationMetric.BCA,
+        ColorBounds(auto_scale=False, vmin=-0.1, vmax=0.7), tmp_path / "figure.png", 72, None,
+    )
+    fig, = captured
+    assert [t.get_text().splitlines()[0] for t in fig.texts] == ["Left", "Right"]
+    assert all(t.get_fontweight() == "bold" for t in fig.texts)
+    assert len(fig.axes) == 7
+    for top, front, back in (fig.axes[:3], fig.axes[3:6]):
+        assert top.get_position().y0 > front.get_position().y0 > back.get_position().y0
+        assert top.images[0].get_clim() == (-0.1, 0.7)
+    scale = fig.axes[-1]
+    assert scale.get_xlabel() == "µV"
+    assert scale.get_position().x0 + scale.get_position().width / 2 == pytest.approx(.5)
+    assert scale.get_position().y1 < min(ax.get_position().y0 for ax in fig.axes[:-1])
+    np.testing.assert_allclose(scale.get_xticks(), [-.1, .1, .3, .5, .7])
 
 
 def test_group_comparison_rejects_incompatible_caps_before_output_or_preview(tmp_path, hydrocel_geometry):
