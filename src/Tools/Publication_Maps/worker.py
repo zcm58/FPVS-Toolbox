@@ -68,7 +68,7 @@ class PublicationMapsWorker(QObject):
             normalized = tuple(requests)
         if not normalized:
             raise ValueError("Scalp Maps requires at least one generation request.")
-        if preview_only and normalized[0].scalp_view != "3d":
+        if preview_only and normalized[0].scalp_view not in ("3d", "stacked_pair"):
             raise ValueError("Choose a 3D scalp surface for the interactive viewer.")
         self._preview_only = preview_only
         baseline = replace(

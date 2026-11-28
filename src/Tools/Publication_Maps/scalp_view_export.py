@@ -19,21 +19,44 @@ from Tools.Publication_Maps.output_contract import PublicationArtifactTransactio
 VIEW_IMAGE_WIDTH_IN = FIGURE_JOURNAL_TEXT_WIDTH_IN * 0.76
 
 
+def camera_view_paths(filename: Path) -> tuple[Path, Path]:
+    """Keep dots in a chosen figure name, including version or session numbers."""
+    stem = filename.stem if filename.suffix.lower() in {".png", ".pdf"} else filename.name
+    return filename.with_name(stem + ".png"), filename.with_name(stem + ".pdf")
+
+
 def draw_view_scale(figure, axis, panel):
     bar = figure.colorbar(ScalarMappable(norm=panel.norm, cmap=panel.cmap), cax=axis, extend=panel.extend)
     bar.set_label(panel.colorbar_label, **figure_text_kwargs("axis_label"))
     apply_axis_text_style(axis)
 
 
+def _camera_export_request(panel, folder: Path) -> PublicationMapRequest:
+    anchor = panel.project_root.absolute() if panel.project_root is not None else Path.cwd()
+    folder = (anchor / folder.expanduser()).absolute()
+    request = PublicationMapRequest(input_root=anchor / panel.input_root.expanduser(), output_root=folder, conditions=())
+    destination = validate_output_root(request)
+    base = (anchor / panel.output_base_root.expanduser()).absolute()
+    if folder.is_relative_to(base) and not destination.is_relative_to(base.resolve()):
+        raise PublicationMapInputError("The selected folder points outside the Scalp Maps output directory.")
+    if panel.project_root is not None and folder.is_relative_to(anchor) and not destination.is_relative_to(anchor.resolve()):
+        raise PublicationMapInputError("The selected project folder points outside the project directory.")
+    return request
+
+
+def prepare_camera_export_folder(panel) -> Path:
+    """Create the validated initial folder only when the user opens Save As."""
+    folder = _camera_export_request(panel, panel.output_root).output_root
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def export_camera_view(image, panel, filename: Path, cancel_check) -> tuple[Path, ...]:
     """Publish the captured viewport with its original scale and editable PDF text."""
     cancel_check()
-    filename = Path(filename).absolute()
-    request = PublicationMapRequest(input_root=panel.input_root, output_root=filename.parent, conditions=())
-    destination = validate_output_root(request)
-    base = panel.output_base_root.absolute()
-    if filename.parent.is_relative_to(base) and not destination.is_relative_to(base.resolve()):
-        raise PublicationMapInputError("The selected folder points outside the Scalp Maps output directory.")
+    filename = Path(filename)
+    request = _camera_export_request(panel, filename.parent)
+    filename = request.output_root / filename.name
     title = textwrap.fill(panel.title, width=55)
     title_height = 0.18 + 0.22 * len(title.splitlines())
     note_height = 0.22 if panel.missing_count else 0
@@ -41,7 +64,7 @@ def export_camera_view(image, panel, filename: Path, cancel_check) -> tuple[Path
     height = max(image_height + title_height + note_height + 0.18, 2.7)
     figure = Figure(figsize=(FIGURE_JOURNAL_TEXT_WIDTH_IN, height), dpi=FIGURE_EXPORT_DPI)
     try:
-        figure.suptitle(title, y=1 - 0.08 / height, **figure_text_kwargs("condition_label"))
+        figure.suptitle(title, y=1 - 0.08 / height, parse_math=False, **figure_text_kwargs("condition_label"))
         bottom = (0.12 + note_height) / height
         plot_height = (height - title_height - note_height - 0.16) / height
         plot = figure.add_axes((0.025, bottom, 0.76, plot_height))
@@ -53,9 +76,9 @@ def export_camera_view(image, panel, filename: Path, cancel_check) -> tuple[Path
             figure.text(0.405, 0.10 / height, f"Missing montage values omitted: {panel.missing_count}",
                         ha="center", **figure_text_kwargs("annotation"))
         with PublicationArtifactTransaction(request) as transaction:
-            for extension in (".png", ".pdf"):
+            for destination_path in camera_view_paths(filename):
                 cancel_check()
-                path = transaction.stage_path(filename.with_suffix(extension))
+                path = transaction.stage_path(destination_path)
                 figure.savefig(path, dpi=FIGURE_EXPORT_DPI)
             verify_publication_workbooks_unchanged(panel.source_workbooks, cancel_check=cancel_check)
             release = _require_managed_publication_release(panel.project_root)

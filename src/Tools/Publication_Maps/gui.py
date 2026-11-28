@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -1485,7 +1486,7 @@ class PublicationMapsWindow(QWidget):
             return None
         request = PublicationMapRequest(
             input_root=Path(input_text),
-            output_root=Path(output_text),
+            output_root=self._selected_output_root(),
             conditions=(),
         )
         try:
@@ -1493,6 +1494,14 @@ class PublicationMapsWindow(QWidget):
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             return str(exc)
         return None
+
+    def _selected_output_root(self) -> Path:
+        text = self.output_root_edit.text().strip()
+        if not text:
+            input_parent = Path(self.input_root_edit.text().strip()).parent
+            return self._default_output_root() or input_parent / SCALP_MAPS_OUTPUT_FOLDER
+        path = Path(os.path.expanduser(text))
+        return self._project_root / path if self._project_root else path
 
     def _sync_paired_condition_selectors(
         self,
@@ -1891,6 +1900,9 @@ class PublicationMapsWindow(QWidget):
             and self._group_comparison_valid()
         )
         groups = self._request_groups()
+        scalp_view = self.scalp_view_combo.currentData()
+        if preview_only and scalp_view != "stacked_pair":
+            scalp_view = "3d"
         comparison_group_ids = (
             tuple(
                 group.group_id
@@ -1903,10 +1915,10 @@ class PublicationMapsWindow(QWidget):
         return tuple(
             PublicationMapRequest(
                 input_root=Path(self.input_root_edit.text().strip()),
-                output_root=Path(self.output_root_edit.text().strip()),
+                output_root=self._selected_output_root(),
                 conditions=selected_conditions,
                 metrics=metrics,
-                scalp_view="3d" if preview_only else self.scalp_view_combo.currentData(),
+                scalp_view=scalp_view,
                 display_montage=self.montage_combo.currentData(),
                 color_bounds=color_bounds,
                 export_png=True,
@@ -2256,6 +2268,5 @@ class PublicationMapsWindow(QWidget):
             self._open_output_folder()
 
     def _open_output_folder(self) -> None:
-        path = self.output_root_edit.text().strip()
-        if path:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if self.output_root_edit.text().strip():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._selected_output_root())))

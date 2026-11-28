@@ -214,6 +214,20 @@ def test_all_groups_builds_separate_canonical_requests(
 
 
 @pytest.mark.qt
+def test_preview_uses_project_output_with_empty_or_relative_folder(qtbot, monkeypatch, tmp_path):
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    default = Path(page.output_root_edit.text())
+    page.output_root_edit.clear()
+    assert page.view_3d_btn.isEnabled()
+    assert not page.run_btn.isEnabled()
+    assert all(req.output_root == default for req in page._collect_requests(preview_only=True))
+    page.output_root_edit.setText("Camera exports")
+    expected = _host.currentProject.project_root / "Camera exports"
+    assert all(req.output_root == expected for req in page._collect_requests(preview_only=True))
+    assert all(req.output_root == expected for req in page._collect_requests())
+
+
+@pytest.mark.qt
 def test_stacked_export_follows_selected_pair(qtbot, monkeypatch, tmp_path):
     _host, page = _build_page(qtbot, monkeypatch, tmp_path)
     page.paired_figures_check.setChecked(True)
@@ -224,6 +238,9 @@ def test_stacked_export_follows_selected_pair(qtbot, monkeypatch, tmp_path):
     for request in page._collect_requests():
         assert request.scalp_view == "stacked_pair"
         assert request.paired_conditions == page._selected_paired_conditions()
+    preview_requests = page._collect_requests(preview_only=True)
+    preview_worker = publication_maps_gui.PublicationMapsWorker(preview_requests, preview_only=True)
+    assert all(request.scalp_view == "stacked_pair" for request in preview_worker.requests)
     page.paired_figures_check.setChecked(False)
     assert not combo.model().item(index).isEnabled()
     assert combo.currentData() == "2d"

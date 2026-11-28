@@ -1,6 +1,8 @@
 """Late source and destination checks for exporting from an open 3D viewer."""
 
 from dataclasses import replace
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib
@@ -49,15 +51,56 @@ def test_stale_view_keeps_both_original_figures(tmp_path, panel, changed, monkey
     assert {p: p.read_bytes() for p in panel.output_root.iterdir()} == originals
 
 
-def test_camera_export_rejects_implicit_link_outside_output_base(tmp_path, panel):
+@pytest.mark.parametrize("linked", ["output_root", "group_folder"])
+def test_camera_export_rejects_implicit_link_outside_output_base(tmp_path, panel, linked):
     outside = tmp_path / "Other"
     outside.mkdir()
-    panel.output_root.mkdir()
-    link = panel.output_root / "Group"
-    try:
+    project = tmp_path / "Project"
+    base = project / "Figures"
+    link = base if linked == "output_root" else base / "Group"
+    link.parent.mkdir(parents=True)
+    panel = replace(panel, project_root=project, output_root=link / "Views", output_base_root=base)
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(outside), str(link))
+    else:
         link.symlink_to(outside, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"Directory symlinks unavailable: {exc}")
+    with pytest.raises(PublicationMapInputError, match="outside"):
+        scalp_view_export.prepare_camera_export_folder(panel)
     with pytest.raises(PublicationMapInputError, match="outside"):
         scalp_view_export.export_camera_view(np.zeros((12, 18, 3)), panel, link / "view.png", lambda: None)
     assert list(outside.iterdir()) == []
+
+
+def test_first_camera_export_creates_group_folder_below_project(tmp_path, panel):
+    project = tmp_path / "Project"
+    project.mkdir()
+    panel = replace(panel, project_root=project, output_base_root=Path("Figures"),
+                    output_root=Path("Figures/Control"))
+    assert not (project / "Figures").exists()
+    folder = scalp_view_export.prepare_camera_export_folder(panel)
+    assert folder == project / "Figures" / "Control"
+    assert folder.is_dir() and list(folder.iterdir()) == []
+
+
+def test_camera_default_folder_rejects_processed_input_tree(panel):
+    invalid = panel.input_root / "Figures"
+    with pytest.raises(ValueError, match="processed Excel input"):
+        scalp_view_export.prepare_camera_export_folder(replace(panel, output_root=invalid))
+    assert not invalid.exists()
+
+
+def test_dotted_camera_view_name_preserves_other_session_files(panel):
+    panel = replace(panel, title="Win $$")
+    panel.output_root.mkdir()
+    for extension in (".png", ".pdf"):
+        (panel.output_root / ("session" + extension)).write_bytes(b"earlier view")
+    target = panel.output_root / "session.2"
+    png, pdf = scalp_view_export.camera_view_paths(target)
+    assert png.name == "session.2.png" and pdf.name == "session.2.pdf"
+    assert scalp_view_export.camera_view_paths(png) == scalp_view_export.camera_view_paths(pdf) == (png, pdf)
+    paths = scalp_view_export.export_camera_view(np.zeros((12, 18, 3)), panel, target, lambda: None)
+    assert set(paths) == {png, pdf}
+    assert png.read_bytes().startswith(b"\x89PNG") and pdf.read_bytes().startswith(b"%PDF")
+    assert all((panel.output_root / ("session" + ext)).read_bytes() == b"earlier view" for ext in (".png", ".pdf"))

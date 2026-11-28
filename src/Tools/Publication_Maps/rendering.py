@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
+from scipy.spatial import QhullError
 
 from Main_App.exports.figure_style import (
     apply_axis_text_style,
@@ -791,7 +792,7 @@ def render_topomap(
             extend=_colorbar_extend(metric),
         )
         _style_colorbar(cbar, metric=metric)
-        ax.set_title(title, pad=8, **figure_text_kwargs("condition_label"))
+        ax.set_title(title, pad=8, parse_math=False, **figure_text_kwargs("condition_label"))
         if missing_count:
             ax.text(
                 0.5,
@@ -972,9 +973,90 @@ def _pair_group(
     return group
 
 
+def _wrap_text_to_width(
+    fig,
+    value: str,
+    *,
+    max_width_pixels: float,
+    text_kwargs: dict[str, object],
+) -> str:
+    """Wrap complete labels using their rendered width without truncation."""
+
+    renderer = fig.canvas.get_renderer()
+    probe = fig.text(0.0, 0.0, "", ha="left", va="bottom", **text_kwargs)
+
+    def fits(candidate: str) -> bool:
+        probe.set_text(candidate)
+        return probe.get_window_extent(renderer).width <= max_width_pixels
+
+    def split_token(token: str) -> list[str]:
+        chunks: list[str] = []
+        current = ""
+        for character in token:
+            candidate = f"{current}{character}"
+            if current and not fits(candidate):
+                chunks.append(current)
+                current = character
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+        return chunks or [token]
+
+    try:
+        lines: list[str] = []
+        for paragraph in str(value).splitlines() or [""]:
+            words = paragraph.split()
+            if not words:
+                lines.append("")
+                continue
+            current = ""
+            for word in words:
+                candidate = f"{current} {word}".strip()
+                if current and fits(candidate):
+                    current = candidate
+                    continue
+                if current:
+                    lines.append(current)
+                chunks = split_token(word)
+                lines.extend(chunks[:-1])
+                current = chunks[-1]
+            if current:
+                lines.append(current)
+        return "\n".join(lines)
+    finally:
+        probe.remove()
+
+
+def _stacked_pair_header(fig, titles, panels):
+    """Reserve extra height only when the full column headers need it."""
+    height = fig.get_figheight()
+    renderer = fig.canvas.get_renderer()
+    width = fig.bbox.width * .408
+    labels = []
+    for x, title, (_, _, missing, _) in zip((.27, .73), titles, panels, strict=True):
+        style = figure_text_kwargs("condition_label")
+        style.update(fontsize=15, fontweight="bold", parse_math=False)
+        label = fig.text(x, .981, title, ha="center", va="top", **style)
+        if missing or label.get_window_extent(renderer).width > width:
+            style["fontsize"] = 10
+            label.set_fontsize(10)
+            value = _wrap_text_to_width(fig, title, max_width_pixels=width, text_kwargs=style)
+            if missing:
+                value += f"\n({missing} missing)"
+            label.set_text(value)
+        labels.append(label)
+    label_height = max(label.get_window_extent(renderer).height for label in labels) / fig.dpi
+    extra = max(0., label_height + 3 / 72 - (.981 - .939) * height)
+    if extra:
+        fig.set_figheight(height + extra)
+        for label in labels:
+            label.set_y(1 - .019 * height / (height + extra))
+    return height / (height + extra)
+
+
 def _render_stacked_pair(frames, titles, geometry, metric, bounds, output_path, dpi, cancel_check):
     """Two condition columns with cubic tops and natural-neighbor front/back views."""
-    from textwrap import fill
     from Tools.Publication_Maps.scalp_surface import draw_scalp_surface, prepare_scalp_surface_pair
 
     panels = [align_render_values(frame, geometry=geometry) for frame in frames]
@@ -983,25 +1065,25 @@ def _render_stacked_pair(frames, titles, geometry, metric, bounds, output_path, 
     cmap = colormap_for_metric(metric, bounds, scalp_view="2d")
     fig = plt.figure(figsize=(6.1, 9.8), dpi=dpi)
     try:
-        for x, title, (data, info, missing, _) in zip((.27, .73), titles, panels, strict=True):
+        vertical_scale = _stacked_pair_header(fig, titles, panels)
+        for x, (data, info, _, _) in zip((.27, .73), panels, strict=True):
             _checkpoint(cancel_check)
-            label = fill(title, width=23)
-            if missing:
-                label += f"\n({missing} missing)"
-            style = figure_text_kwargs("condition_label")
-            style.update(fontsize=15 if "\n" not in label else 10, fontweight="bold")
-            fig.text(x, .981, label, ha="center", va="top", **style)
-            top, front, back = [fig.add_axes([x - .204, y, .408, height])
-                                for y, height in ((.696, .243), (.389, .289), (.084, .289))]
+            top, front, back = [
+                fig.add_axes([x - .204, y * vertical_scale, .408, height * vertical_scale])
+                for y, height in ((.696, .243), (.389, .289), (.084, .289))
+            ]
             _plot_topomap_compat(data=data, info=info, ax=top, cmap=cmap, vlim=vlim)
             prepare_scalp_surface_pair(info, front, back)
             for ax, view in ((front, "front"), (back, "back")):
                 _checkpoint(cancel_check)
                 draw_scalp_surface(ax, data, info, view=view, cmap=cmap, norm=norm)
         ticks = np.linspace(*vlim, 5)
-        bar = fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), cax=fig.add_axes([.235, .053, .53, .012]),
+        bar = fig.colorbar(matplotlib.cm.ScalarMappable(norm, cmap), cax=fig.add_axes([.235, .053 * vertical_scale, .53, .012 * vertical_scale]),
                            orientation="horizontal", ticks=ticks, extend=_colorbar_extend(metric))
-        if len({f"{value:.2f}" for value in ticks}) == len(ticks):
+        # Preserve the reference two-decimal labels only if they describe
+        # the actual tick locations, including the requested limits.
+        tolerance = 8 * np.finfo(float).eps * np.max(np.abs(ticks))
+        if np.all(np.abs(ticks - np.round(ticks, 2)) <= tolerance):
             bar.set_ticks(ticks, labels=[f"{value:.2f}" for value in ticks])
         bar.outline.set_visible(False)
         bar.ax.tick_params(length=0, labelsize=10, pad=3)
@@ -1079,6 +1161,7 @@ def _render_paired_topomap(
         if figure_title:
             fig.suptitle(
                 str(figure_title),
+                parse_math=False,
                 y=layout_style.paired_figure_title_y,
                 **figure_text_kwargs("condition_label"),
             )
@@ -1134,6 +1217,7 @@ def _render_combined_paired_topomap(
         if figure_title:
             fig.suptitle(
                 str(figure_title),
+                parse_math=False,
                 y=layout_style.combined_figure_title_y,
                 **figure_text_kwargs("condition_label"),
             )
@@ -1402,7 +1486,7 @@ def _style_colorbar(
 def _paired_condition_title_kwargs() -> dict[str, object]:
     """Return bold, larger title styling for paired scalp-map column headers."""
 
-    return figure_text_kwargs("panel_label")
+    return {**figure_text_kwargs("panel_label"), "parse_math": False}
 
 
 def _colorbar_text_kwargs() -> dict[str, object]:
@@ -1512,6 +1596,12 @@ def _plot_topomap_compat(
             outlines="head",
         )
         return im
+    except QhullError as exc:
+        raise PublicationMapInputError(
+            "The cubic 2D top view cannot triangulate these electrode locations. "
+            "This can happen when the projected electrodes lie on a circle. "
+            "Choose 3D front and back, or View in 3D, to use the recorded positions."
+        ) from exc
     except TypeError:
         im, _ = mne.viz.plot_topomap(
             data,

@@ -64,7 +64,6 @@ class _HeadImage:
     skin: np.ndarray
     pixel_indices: np.ndarray
     cap_coordinates: np.ndarray
-    depth: np.ndarray
     extent: tuple[float, float, float, float]
 
 
@@ -261,7 +260,7 @@ def _render_head(view: str, width: int) -> _HeadImage:
     """Rasterize static anatomy with a depth buffer shared by all data panels."""
     geometry = _geometry()
     basis = _camera(view)
-    camera_vertices = geometry.vertices @ basis.T
+    camera_vertices = np.einsum("ij,kj->ik", geometry.vertices, basis)
     # Frame both complete template views at the same physical scale.
     left, right, bottom, top = -0.091, 0.091, -0.126, 0.142
     pixel = (right - left) / width
@@ -274,11 +273,12 @@ def _render_head(view: str, width: int) -> _HeadImage:
         np.add.at(normals, column, face_normals)
     normals /= np.maximum(np.linalg.norm(normals, axis=1), 1e-15)[:, None]
     light = np.array([-0.48, 0.55, 0.68])
-    brightness = 145 + 91 * np.maximum(0, normals @ light)
+    brightness = 145 + 91 * np.maximum(0, np.einsum("ij,j->i", normals, light))
     screen = (camera_vertices[:, :2] - [left, bottom]) / pixel - 0.5
     front_faces = geometry.faces[face_normals[:, 2] > 0]
     depth, gray = _rasterize_skin(screen, front_faces, camera_vertices[:, 2], brightness, width, height)
-    pixels = np.flatnonzero(np.isfinite(depth)).astype(np.int32)
+    inside_head = np.isfinite(depth)
+    pixels = np.flatnonzero(inside_head).astype(np.int32)
     surface_coordinates = np.empty((len(pixels), 2), dtype=np.float32)
     skin_surface = np.empty(len(pixels), dtype=bool)
     # A large print tile contains millions of points. Project small blocks to
@@ -286,31 +286,46 @@ def _render_head(view: str, width: int) -> _HeadImage:
     for start in range(0, len(pixels), 65_536):
         block = pixels[start:start + 65_536]
         y, x = np.divmod(block, width)
-        camera_points = np.column_stack((left + (x + 0.5) * pixel, bottom + (y + 0.5) * pixel, depth.flat[block]))
-        world = camera_points @ basis
+        camera_points = np.column_stack((left + (x + 0.5) * pixel, bottom + (y + 0.5) * pixel, depth.ravel()[block]))
+        # Keep the three-component transforms local to each camera worker.
+        world = np.einsum("ij,jk->ik", camera_points, basis)
         surface_coordinates[start:start + len(block)] = _cap_coordinates(world - geometry.origin)
-        skin_surface[start:start + len(block)] = world @ geometry.neck_plane[:3] + geometry.neck_plane[3] > 1e-7
-    skin = np.empty((height, width, 4), dtype=np.uint8)
-    skin[:, :, :3] = gray[:, :, None]
-    skin[:, :, 3] = np.where(np.isfinite(depth), 255, 0)
+        neck_height = np.einsum("ij,j->i", world, geometry.neck_plane[:3]) + geometry.neck_plane[3]
+        skin_surface[start:start + len(block)] = neck_height > 1e-7
+    skin = np.stack((gray, gray, gray, inside_head.astype(np.uint8) * 255), axis=-1)
     if not skin_surface.all():
         pixels = pixels[skin_surface]
         surface_coordinates = surface_coordinates[skin_surface]
-    return _HeadImage(skin, pixels, surface_coordinates, depth.astype(np.float32), extent)
+    return _HeadImage(skin, pixels, surface_coordinates, extent)
 
 
-def _camera_sensors(head: _HeadImage, view: str, locations: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Project a panel's own electrodes and depth-test them against the shared anatomy."""
-    left, right, bottom, _ = head.extent
-    height, width = head.depth.shape
-    pixel = (right - left) / width
-    sensors = locations @ _camera(view).T
-    ix = np.clip(((sensors[:, 0] - left) / pixel).astype(int), 0, width - 1)
-    iy = np.clip(((sensors[:, 1] - bottom) / pixel).astype(int), 0, height - 1)
-    # Only the front surface can show a dot. One pixel of tolerance handles
-    # the difference between an exact projected location and a pixel centre.
-    depth_at_sensor = head.depth[iy, ix]
-    visible = np.isfinite(depth_at_sensor) & (sensors[:, 2] + 2 * pixel >= depth_at_sensor)
+@lru_cache(maxsize=32)
+def _camera_sensors(view: str, location_bytes: bytes) -> tuple[np.ndarray, np.ndarray]:
+    """Check visibility at each sensor's exact location, independent of print resolution."""
+    geometry = _geometry()
+    camera = _camera(view).T
+    sensors = np.frombuffer(location_bytes, np.float64).reshape(-1, 3) @ camera
+    triangles = (geometry.vertices @ camera)[geometry.faces]
+    a, b, c = triangles.transpose(1, 0, 2)
+    ab, ac = b - a, c - a
+    determinant = ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]
+    # For each front-facing triangle, only test electrodes in its horizontal
+    # span. A dense cap still needs a small number of point/triangle tests.
+    ordered = np.argsort(sensors[:, 0])
+    xs = sensors[ordered, 0]
+    left = np.searchsorted(xs, np.minimum(np.minimum(a[:, 0], b[:, 0]), c[:, 0]) - 1e-12)
+    right = np.searchsorted(xs, np.maximum(np.maximum(a[:, 0], b[:, 0]), c[:, 0]) + 1e-12)
+    counts = np.where(determinant > 0, right - left, 0)
+    faces = np.repeat(np.arange(len(triangles)), counts)
+    offsets = np.cumsum(counts) - counts
+    candidates = ordered[left[faces] + np.arange(len(faces)) - offsets[faces]]
+    dx, dy = (sensors[candidates, :2] - a[faces, :2]).T
+    u = (dx * ac[faces, 1] - dy * ac[faces, 0]) / determinant[faces]
+    v = (dy * ab[faces, 0] - dx * ab[faces, 1]) / determinant[faces]
+    depth = a[faces, 2] + u * ab[faces, 2] + v * ac[faces, 2]
+    hidden = (u >= -1e-10) & (v >= -1e-10) & (u + v <= 1 + 1e-10) & (depth > sensors[candidates, 2] + 1e-8)
+    visible = np.ones(len(sensors), dtype=bool)
+    visible[candidates[hidden]] = False
     return sensors[:, :2], visible
 
 
@@ -541,6 +556,6 @@ def draw_scalp_surface(ax, data, info, *, view, cmap, norm) -> None:
     key = projection.cap_coordinates.tobytes()
     _paint(rgba, _scalp_field(key), _fixed_samples(key, view, width), data, cmap, norm)
     ax.imshow(rgba, origin="lower", extent=head.extent, interpolation="none", aspect="equal")
-    xy, visible = _camera_sensors(head, view, projection.locations)
+    xy, visible = _camera_sensors(view, projection.locations.tobytes())
     ax.scatter(xy[visible, 0], xy[visible, 1], s=2.5, c="#171717", edgecolors="none", clip_on=True)
     ax.set_axis_off()

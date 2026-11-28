@@ -10,7 +10,7 @@ from threading import Event
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
 )
@@ -21,7 +21,9 @@ from Tools.LORETA_Visualizer.graphics_support import require_desktop_opengl
 from Tools.Publication_Maps.generation_outcome import PublicationMapGenerationCancelled
 from Tools.Publication_Maps.rendering import sanitize_filename_stem
 from Tools.Publication_Maps.scalp_surface import _camera, build_scalp_surface_scene
-from Tools.Publication_Maps.scalp_view_export import VIEW_IMAGE_WIDTH_IN, draw_view_scale, export_camera_view
+from Tools.Publication_Maps.scalp_view_export import (
+    VIEW_IMAGE_WIDTH_IN, camera_view_paths, draw_view_scale, export_camera_view, prepare_camera_export_folder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,12 @@ class ScalpSurfaceDialog(QDialog):
         self.camera_combo = QComboBox()
         self.camera_combo.setAccessibleName("Camera view")
         self.camera_combo.addItems(["Back", "Front", "Left", "Right", "Top"])
+        self.camera_combo.setPlaceholderText("Custom")
+        self._preset_index = 0
+        self._preset_orientation = None
+        self._orientation_timer = QTimer(self)
+        self._orientation_timer.setSingleShot(True)
+        self._orientation_timer.timeout.connect(self._update_camera_label)
         self.camera_combo.activated.connect(self.reset_camera)
         controls.addWidget(QLabel("Camera"))
         controls.addWidget(self.camera_combo)
@@ -126,6 +134,7 @@ class ScalpSurfaceDialog(QDialog):
             self._plotter.set_background("white")
             self._plotter.enable_parallel_projection()
             canvas_row.insertWidget(0, self._plotter, 1)
+            self._camera_observer = self._plotter.camera.AddObserver("ModifiedEvent", self._camera_changed)
         except Exception:  # Construction failure must close native resources and prevent queued scene delivery.
             self._closed = True
             if self._plotter is not None:
@@ -219,6 +228,9 @@ class ScalpSurfaceDialog(QDialog):
 
     @Slot()
     def reset_camera(self):
+        if self.camera_combo.currentIndex() < 0:
+            self.camera_combo.setCurrentIndex(self._preset_index)
+        self._preset_index = self.camera_combo.currentIndex()
         view = self.camera_combo.currentText()
         if view in ("Front", "Back"):
             offset = _camera(view.lower())[2]
@@ -229,8 +241,22 @@ class ScalpSurfaceDialog(QDialog):
         camera.focal_point = self._focal
         camera.up = (0, 1, 0) if view == "Top" else (0, 0, 1)
         camera.parallel_scale = 0.15
+        self._preset_orientation = camera.GetOrientation()
         self._plotter.reset_camera_clipping_range()
         self._plotter.render()
+
+    def _camera_changed(self, _camera, _event):
+        # VTK updates position and focal point separately during a pan. Read
+        # the final orientation after the interaction event has completed.
+        if self.camera_combo.currentIndex() >= 0 and not self._orientation_timer.isActive():
+            self._orientation_timer.start(0)
+
+    @Slot()
+    def _update_camera_label(self):
+        if self._preset_orientation is not None and not self._closed:
+            orientation = self._plotter.camera.GetOrientation()
+            if not np.allclose(orientation, self._preset_orientation, atol=1e-6, rtol=0):
+                self.camera_combo.setCurrentIndex(-1)
 
     def zoom(self, factor):
         self._plotter.camera.Zoom(factor)
@@ -239,7 +265,13 @@ class ScalpSurfaceDialog(QDialog):
     @Slot()
     def _choose_export(self):
         panel = self.current_panel
-        default = panel.output_root / (sanitize_filename_stem(panel.label) + "_3d_view.png")
+        try:
+            folder = prepare_camera_export_folder(panel)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("scalp_camera_output_folder_unavailable", exc_info=True)
+            self.status.setText(f"Could not open the export folder. {exc}")
+            return
+        default = folder / (sanitize_filename_stem(panel.label) + "_3d_view.png")
         filename, _ = QFileDialog.getSaveFileName(
             self, "Export current view as PNG and PDF", str(default), "PNG figure (*.png)",
             options=QFileDialog.Option.DontConfirmOverwrite,
@@ -247,7 +279,7 @@ class ScalpSurfaceDialog(QDialog):
         if not filename:
             return
         target = Path(filename)
-        existing = [target.with_suffix(ext).name for ext in (".png", ".pdf") if target.with_suffix(ext).exists()]
+        existing = [path.name for path in camera_view_paths(target) if path.exists()]
         if existing and QMessageBox.question(
             self, "Replace figures?", "Replace " + " and ".join(existing) + "?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
@@ -306,6 +338,8 @@ class ScalpSurfaceDialog(QDialog):
         self._closed = True
         self._cancel.set()
         if self._plotter is not None:
+            self._plotter.camera.RemoveObserver(self._camera_observer)
+            self._orientation_timer.stop()
             self._plotter.close()
             self._plotter = None
         super().done(result)

@@ -156,6 +156,12 @@ Rules:
 - The paired stacked export writes one figure per selected metric. Condition A
   and B are the columns, with cubic top, 3D front and 3D back rows. Use bold
   headings, the classic top-map palette, and a single horizontal bottom scale.
+  Fit the full literal condition names and any missing-electrode notes above
+  the maps. Tick labels must resolve the selected limits. If MNE cannot
+  triangulate a symmetric projected layout, direct the user to the 3D-only
+  view and preserve the supplied coordinates.
+  The interactive preview and camera export for this layout share that palette
+  and those limits for both conditions.
 - Paired-condition export is paired-only and is the GUI default: when it is
   enabled, render only the combined paired `.png` and `.pdf`, not individual
   condition figures.

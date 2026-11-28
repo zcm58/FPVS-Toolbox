@@ -166,6 +166,54 @@ def test_failed_panel_clears_stale_scene_and_can_recover(dialog, qtbot, monkeypa
     assert dialog._plotter.actors
 
 
+def test_camera_label_tracks_free_rotation_and_reset_recalls_selected_preset(dialog, qtbot):
+    dialog.camera_combo.setCurrentText("Left")
+    dialog.camera_combo.activated.emit(dialog.camera_combo.currentIndex())
+    camera = dialog._plotter.camera
+    original = _camera_state(camera)
+    delta = np.array([.015, -.004, .006])
+    camera.position = np.asarray(camera.position) + delta
+    camera.focal_point = np.asarray(camera.focal_point) + delta
+    dialog.zoom(1.3)
+    qtbot.waitUntil(lambda: not dialog._orientation_timer.isActive())
+    assert dialog.camera_combo.currentText() == "Left"
+
+    camera.Azimuth(33)
+    qtbot.waitUntil(lambda: dialog.camera_combo.currentIndex() == -1)
+    assert dialog.camera_combo.placeholderText() == "Custom"
+    dialog.map_combo.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: dialog.export_button.isEnabled())
+    assert dialog.camera_combo.currentIndex() == -1
+    next(b for b in dialog.findChildren(QPushButton) if b.text() == "Reset view").click()
+    qtbot.waitUntil(lambda: not dialog._orientation_timer.isActive())
+    assert dialog.camera_combo.currentText() == "Left"
+    np.testing.assert_allclose(_camera_state(camera), original)
+
+
+def test_first_save_as_offers_existing_output_folder_and_cancel_creates_no_figures(dialog, tmp_path, monkeypatch):
+    folder = tmp_path / "Figures" / "Control"
+    dialog.panels = tuple(replace(p, output_root=folder, output_base_root=folder.parent) for p in dialog.panels)
+    offered = []
+
+    def cancel(_parent, _title, filename, _filters, **_options):
+        offered.append(filename)
+        assert folder.is_dir()
+        return "", ""
+
+    monkeypatch.setattr(scalp_viewer.QFileDialog, "getSaveFileName", cancel)
+    dialog.export_button.click()
+    assert offered == [str(folder / "Words_BCA_3d_view.png")]
+    assert list(folder.iterdir()) == []
+
+
+def test_invalid_default_export_folder_reports_error_without_opening_picker(dialog, monkeypatch):
+    dialog.panels = tuple(replace(p, output_root=p.input_root) for p in dialog.panels)
+    monkeypatch.setattr(scalp_viewer.QFileDialog, "getSaveFileName", lambda *_a, **_kw: pytest.fail("unexpected picker"))
+    dialog.export_button.click()
+    assert "processed Excel input folder" in dialog.status.text()
+    assert dialog.export_button.isEnabled()
+
+
 def test_close_during_export_cancels_publication(dialog, qtbot, tmp_path, monkeypatch):
     started, release, cancelled = Event(), Event(), Event()
 

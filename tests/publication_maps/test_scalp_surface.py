@@ -40,12 +40,16 @@ def test_electrodes_follow_canonical_montage_directions_on_template():
     # looking into the face and looking at the back of the participant.
     fp1, fp2, oz = map(info.ch_names.index, ("Fp1", "Fp2", "Oz"))
     front, back = (_render_head(view, 256) for view in ("front", "back"))
-    front_xy, front_mask = _camera_sensors(front, "front", projection.locations)
-    back_xy, back_mask = _camera_sensors(back, "back", projection.locations)
+    front_xy, front_mask = _camera_sensors("front", projection.locations.tobytes())
+    back_xy, back_mask = _camera_sensors("back", projection.locations.tobytes())
     assert front_xy[fp1, 0] > front_xy[fp2, 0]
     assert back_xy[fp1, 0] < back_xy[fp2, 0]
     assert front_mask[fp1] and not front_mask[oz]
     assert back_mask[oz] and not back_mask[fp1]
+    # At the silhouette, exact mesh rays expose FC5 and occlude C5 from
+    # the front, and expose FCz from the rear of this tilted template.
+    assert front_mask[info.ch_names.index("FC5")] and not front_mask[info.ch_names.index("C5")]
+    assert back_mask[info.ch_names.index("FCz")]
     assert front.extent == back.extent
 
 
@@ -56,6 +60,18 @@ def test_display_preserves_signed_values_without_extrapolation():
     result = _display_at(tetra, values, at)
     np.testing.assert_allclose(result[:3], [-3., 0., 3.], atol=1e-14)
     assert np.isnan(result[-1])
+
+
+@pytest.mark.parametrize("view", ["front", "back"])
+def test_electrode_visibility_is_identical_in_small_and_large_export_panels(view):
+    info = biosemi64_info()
+    data = np.arange(len(info.ch_names), dtype=float)
+    dots = []
+    for size in (1.5, 6.0):
+        ax = Figure(figsize=(size, size), dpi=100).subplots()
+        draw_scalp_surface(ax, data, info, view=view, cmap=matplotlib.colormaps["viridis"], norm=Normalize(0, 64))
+        dots.append(ax.collections[0].get_offsets())
+    np.testing.assert_array_equal(dots[0], dots[1])
 
 
 def test_dense_jagged_field_matches_exact_sites_hull_and_subpercent_raster_accuracy():
@@ -170,9 +186,8 @@ def test_only_visible_finite_sensors_are_marked_and_unsupported_head_stays_neutr
     neutral_head = (image[:, :, 3] == 255) & (image[:, :, 0] < 250)
     assert np.any(neutral_head) and np.any(np.all(image == 255, axis=2))
     assert np.all(image[:, :, 0][neutral_head] == image[:, :, 2][neutral_head])
-    head = _render_head(view, image.shape[1])
-    xy, expected = _camera_sensors(head, view, _sensor_projection(info).locations)
-    expected[info.ch_names.index(missing)] = False
+    xy, expected = _camera_sensors(view, _sensor_projection(info).locations.tobytes())
+    expected = expected & (np.array(info.ch_names) != missing)
     np.testing.assert_allclose(ax.collections[0].get_offsets(), xy[expected])
     assert len(ax.collections[0].get_edgecolors()) == 0
 

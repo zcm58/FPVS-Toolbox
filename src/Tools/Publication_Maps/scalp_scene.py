@@ -56,6 +56,7 @@ def build_surface_panels(
     cancel_check: Callable[[], None],
 ) -> tuple[ScalpSurfacePanel, ...]:
     first = requests[0]
+    palette_view = "2d" if first.scalp_view == "stacked_pair" else "3d"
     panels: list[ScalpSurfacePanel] = []
     source_workbooks = tuple(entry for result in results for entry in result.included_workbooks)
     release_fingerprints = {
@@ -85,7 +86,7 @@ def build_surface_panels(
             colorbar_label=colorbar_label_for_metric(metric),
             data=data,
             info=info,
-            cmap=matplotlib.colormaps["RdBu_r"] if difference else colormap_for_metric(metric, bounds, scalp_view="3d"),
+            cmap=matplotlib.colormaps["RdBu_r"] if difference else colormap_for_metric(metric, bounds, scalp_view=palette_view),
             norm=Normalize(*vlim),
             extend="neither" if difference else _colorbar_extend(metric),
             missing_count=missing,

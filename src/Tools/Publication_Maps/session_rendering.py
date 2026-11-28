@@ -25,6 +25,7 @@ from Tools.Publication_Maps.rendering import (
     _metric_limits,
     _save_figure,
     _style_colorbar,
+    _wrap_text_to_width,
     colormap_for_metric,
     figure_stem,
     plt,
@@ -136,61 +137,6 @@ def _group_column_divider_x(axes) -> float:
     return (left_column_right + right_column_left) / 2.0
 
 
-def _wrap_text_to_width(
-    fig,
-    value: str,
-    *,
-    max_width_pixels: float,
-    text_kwargs: dict[str, object],
-) -> str:
-    """Wrap complete labels using their rendered width without truncation."""
-
-    renderer = fig.canvas.get_renderer()
-    probe = fig.text(0.0, 0.0, "", ha="left", va="bottom", **text_kwargs)
-
-    def fits(candidate: str) -> bool:
-        probe.set_text(candidate)
-        return probe.get_window_extent(renderer).width <= max_width_pixels
-
-    def split_token(token: str) -> list[str]:
-        chunks: list[str] = []
-        current = ""
-        for character in token:
-            candidate = f"{current}{character}"
-            if current and not fits(candidate):
-                chunks.append(current)
-                current = character
-            else:
-                current = candidate
-        if current:
-            chunks.append(current)
-        return chunks or [token]
-
-    try:
-        lines: list[str] = []
-        for paragraph in str(value).splitlines() or [""]:
-            words = paragraph.split()
-            if not words:
-                lines.append("")
-                continue
-            current = ""
-            for word in words:
-                candidate = f"{current} {word}".strip()
-                if current and fits(candidate):
-                    current = candidate
-                    continue
-                if current:
-                    lines.append(current)
-                chunks = split_token(word)
-                lines.extend(chunks[:-1])
-                current = chunks[-1]
-            if current:
-                lines.append(current)
-        return "\n".join(lines)
-    finally:
-        probe.remove()
-
-
 def _column_text_width_pixels(fig, axes, column: int) -> float:
     return max(
         1.0,
@@ -217,9 +163,8 @@ def _reserve_repeated_session_label_space(
 ) -> float:
     """Fit header and row-label bands using the actual rendered font metrics."""
 
-    text_kwargs = figure_text_kwargs("panel_label")
-    row_kwargs = figure_text_kwargs("condition_label")
-    row_kwargs["fontweight"] = "bold"
+    text_kwargs = {**figure_text_kwargs("panel_label"), "parse_math": False}
+    row_kwargs = {**figure_text_kwargs("condition_label"), "fontweight": "bold", "parse_math": False}
     row_labels = _repeated_session_row_labels(panel_set, len(row_label_axes))
     padding_pixels = 3.0 * fig.dpi / 72.0
     probe = fig.text(0.0, 0.0, "", **text_kwargs)
@@ -298,7 +243,7 @@ def _apply_repeated_session_labels(
 ) -> None:
     """Apply agnostic group headers and one external label per matrix row."""
 
-    header_kwargs = figure_text_kwargs("panel_label")
+    header_kwargs = {**figure_text_kwargs("panel_label"), "parse_math": False}
     for column, group_id in enumerate(panel_set.group_ids):
         max_width_pixels = _column_text_width_pixels(fig, axes, column)
         column_center = (
@@ -325,8 +270,7 @@ def _apply_repeated_session_labels(
 
     row_labels = _repeated_session_row_labels(panel_set, len(row_label_axes))
 
-    label_kwargs = figure_text_kwargs("condition_label")
-    label_kwargs["fontweight"] = "bold"
+    label_kwargs = {**figure_text_kwargs("condition_label"), "fontweight": "bold", "parse_math": False}
     row_texts = []
     for row, (label_ax, label) in enumerate(zip(row_label_axes, row_labels, strict=True)):
         max_height_pixels = label_ax.get_position().height * fig.bbox.height

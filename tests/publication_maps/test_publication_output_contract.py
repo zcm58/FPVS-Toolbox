@@ -930,6 +930,7 @@ def test_named_montage_reaches_each_ordinary_and_paired_figure(
         export_paired_figures=paired, paired_conditions=conditions if paired else (),
     )
     seen = []
+    surface_scales = []
     if view == "2d":
         draw = rendering._plot_topomap_compat
 
@@ -943,6 +944,7 @@ def test_named_montage_reaches_each_ordinary_and_paired_figure(
 
         def capture(ax, data, info, **kwargs):
             seen.append(tuple(info.ch_names))
+            surface_scales.append((kwargs["cmap"], kwargs["norm"]))
             return draw(ax, data, info, **kwargs)
 
         monkeypatch.setattr(scalp_surface, "draw_scalp_surface", capture)
@@ -953,7 +955,12 @@ def test_named_montage_reaches_each_ordinary_and_paired_figure(
         assert all(path.stem.endswith("_paired_stacked_pair") for path in paths)
         assert len(seen) == 4 * len(metrics)
     assert seen and all(channels == names for channels in seen)
-    panels = build_surface_panels([result], [dataclasses.replace(request, scalp_view="3d")], cancel_check=lambda: None)
+    preview = request if view == "stacked_pair" else dataclasses.replace(request, scalp_view="3d")
+    panels = build_surface_panels([result], [preview], cancel_check=lambda: None)
+    if view == "stacked_pair":
+        for panel, (cmap, norm) in zip(panels, surface_scales[::2], strict=True):
+            np.testing.assert_array_equal(panel.cmap(np.linspace(0, 1, 256)), cmap(np.linspace(0, 1, 256)))
+            assert (panel.norm.vmin, panel.norm.vmax) == (norm.vmin, norm.vmax)
     assert len(panels) == len(conditions) * len(metrics)
     for panel in panels:
         assert tuple(panel.info.ch_names) == names
@@ -983,6 +990,56 @@ def test_stacked_pair_has_ordered_columns_and_one_bottom_scale(tmp_path, monkeyp
     assert scale.get_position().x0 + scale.get_position().width / 2 == pytest.approx(.5)
     assert scale.get_position().y1 < min(ax.get_position().y0 for ax in fig.axes[:-1])
     np.testing.assert_allclose(scale.get_xticks(), [-.1, .1, .3, .5, .7])
+
+
+def test_stacked_pair_keeps_long_headers_and_missing_notes_above_maps(tmp_path, monkeypatch):
+    from Tools.Publication_Maps import rendering
+
+    frame = _comparison_result("clinical", "Clinical", scale=1.0).grand_average_values
+    titles = ("W" * 23, "Win $$ during the secondary counterbalanced positive feedback block " * 2)
+    captured = []
+    monkeypatch.setattr(rendering, "_save_figure", lambda fig, *a, **kw: captured.append(fig))
+    rendering._render_stacked_pair(
+        (frame, frame), titles, None, PublicationMetric.BCA, ColorBounds(auto_scale=False, vmin=0, vmax=.075),
+        tmp_path / "figure.png", 100, None,
+    )
+    fig, = captured
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    boxes = [text.get_window_extent(renderer) for text in fig.texts]
+    assert fig.bbox.x0 <= boxes[0].x0 < boxes[0].x1 < boxes[1].x0 < boxes[1].x1 <= fig.bbox.x1
+    for title, label, box, top in zip(titles, fig.texts, boxes, fig.axes[::3][:2], strict=True):
+        assert "".join(title.split()) in "".join(label.get_text().split())
+        assert "missing" in label.get_text()
+        assert fig.bbox.y1 >= box.y1 > box.y0 > top.get_position(original=True).y1 * fig.bbox.height
+    assert float(fig.axes[-1].get_xticklabels()[-1].get_text()) == .075
+
+
+def test_reward_condition_with_dollar_signs_exports_literally(tmp_path):
+    from Tools.Publication_Maps import rendering
+
+    result = _comparison_result("clinical", "Clinical", scale=1.0)
+    output = tmp_path / "reward.png"
+    rendering.render_topomap(result.grand_average_values, metric=PublicationMetric.BCA,
+                             title="Win $$", output_path=output, dpi=72, scalp_view="3d")
+    assert output.stat().st_size > 1000
+
+
+def test_symmetric_ring_offers_3d_when_cubic_head_triangulation_fails():
+    import mne
+    from Tools.Publication_Maps import rendering
+
+    channels = ["Fp1", "Fp2", "O1", "O2"]
+    xyz = np.asarray([[-1, 1, 1], [1, 1, 1], [-1, -1, 1], [1, -1, 1]]) * .06
+    info = mne.create_info(channels, 250, "eeg").set_montage(
+        mne.channels.make_dig_montage(ch_pos=dict(zip(channels, xyz, strict=True)), coord_frame="head")
+    )
+    fig, ax = rendering.plt.subplots()
+    try:
+        with pytest.raises(PublicationMapInputError, match="Choose 3D front and back"):
+            rendering._plot_topomap_compat(data=np.arange(4.), info=info, ax=ax, cmap="viridis", vlim=(0, 3))
+    finally:
+        rendering.plt.close(fig)
 
 
 def test_group_comparison_rejects_incompatible_caps_before_output_or_preview(tmp_path, hydrocel_geometry):
