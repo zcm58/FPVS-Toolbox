@@ -85,11 +85,11 @@ def _timestamp_ns(value: str) -> tuple[int, int]:
     return (delta // timedelta(seconds=1)) * 10**9 + int(fraction.ljust(9, "0")), len(fraction)
 
 
-def _eeg_grid(path: Path) -> tuple[int, int, int]:
+def _eeg_grid(path: Path, ticks_per_second: int) -> tuple[int, int, int, int]:
     """Count complete blocks using MFF's little-endian float32 block headers."""
     with path.open("rb") as stream:
         size = os.fstat(stream.fileno()).st_size
-        rate = block_bytes = block_samples = blocks = samples = 0
+        rate = block_bytes = block_samples = blocks = samples = block_ticks = 0
         while (start := stream.tell()) < size:
             flag, = struct.unpack("<I", stream.read(4))
             if flag == 1:
@@ -121,9 +121,10 @@ def _eeg_grid(path: Path) -> tuple[int, int, int]:
             stream.seek(block_bytes, os.SEEK_CUR)
             blocks += 1
             samples += block_samples
+            block_ticks += block_samples * ticks_per_second // rate
     if not blocks:
         raise RecordingEventError("MFF EEG stream is empty.")
-    return rate, samples, blocks
+    return rate, samples, blocks, block_ticks
 
 
 def read_mff_din_events(
@@ -160,10 +161,15 @@ def read_mff_din_events(
             or (root / "categories.xml").exists()
         ):
             raise RecordingEventError("Event inspection requires one continuous, unsegmented EEG epoch.")
-        rate, samples, blocks = _eeg_grid(_member(root, "signal1.bin"))
+        ticks_per_second = 10**precision
+        rate, samples, blocks, block_ticks = _eeg_grid(_member(root, "signal1.bin"), ticks_per_second)
         epoch = epochs[0]
+        end = int(_text(epoch, "endTime"))
+        # Native writers can truncate to integer epoch units once per block.
+        # Accept only an explainable endpoint that still identifies the same sample count.
         if (
-            int(_text(epoch, "endTime")) * rate != samples * 10**precision
+            end not in (samples * ticks_per_second // rate, block_ticks)
+            or samples * ticks_per_second - end * rate >= ticks_per_second
             or int(_text(epoch, "firstBlock")) != 1 or int(_text(epoch, "lastBlock")) != blocks
         ):
             raise RecordingEventError("Epoch timing or block range disagrees with the EEG sample grid.")

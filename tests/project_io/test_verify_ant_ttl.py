@@ -133,6 +133,36 @@ def test_matching_codes_with_wrong_recorder_sample_rate_are_flagged(tmp_path, ca
     assert comparison["differences"] == ["Studio configured 512 Hz, but the CNT records 1000 Hz."]
 
 
+@pytest.mark.parametrize("gap_source", ["seg", "embedded"])
+def test_ordered_words_keep_samples_but_do_not_report_drift_across_a_gap(tmp_path, capsys, gap_source):
+    events = [("1", 20), ("55", 220), ("55", 1420)]
+    if gap_source == "embedded":
+        events.insert(2, ("__", 1000))
+    path = write_ant_fixture(tmp_path / "resumed.cnt", events)
+    if gap_source == "seg":
+        path.with_suffix(".seg").write_text("NumberSegments=2\n43831 60.0 1000\n")
+    _write_run(tmp_path, times=(0.020, 0.220, 60.420))
+    assert main([str(path), "--studio-run", str(tmp_path)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["timing_break_samples"] == [1000]
+    comparison = report["comparison"]
+    assert comparison["elapsed_time_discontinuous_from_sample"] == 1000
+    assert [row["cnt_sample"] for row in comparison["aligned_markers"]] == [20, 220, 1420]
+    offsets = [row["cnt_minus_studio_elapsed_ms"] for row in comparison["aligned_markers"]]
+    assert offsets[:2] == pytest.approx([0, 0])
+    assert offsets[2] is None
+
+
+def test_timing_within_a_resumed_segment_remains_available(tmp_path, capsys):
+    path = write_ant_fixture(tmp_path / "later.cnt", [("1", 1000), ("55", 1200), ("55", 1400)])
+    path.with_suffix(".seg").write_text("NumberSegments=2\n43831 60.0 1000\n")
+    _write_run(tmp_path)
+    assert main([str(path), "--studio-run", str(tmp_path)]) == 0
+    comparison = json.loads(capsys.readouterr().out)["comparison"]
+    assert "elapsed_time_discontinuous_from_sample" not in comparison
+    assert [row["cnt_minus_studio_elapsed_ms"] for row in comparison["aligned_markers"]] == pytest.approx([0, 0, 0])
+
+
 def test_snapshot_from_another_transport_reports_mismatch_without_ant_fields(tmp_path, capsys):
     path = write_ant_fixture(tmp_path / "faces.cnt", [("1", 20), ("55", 220), ("55", 420)])
     _write_run(tmp_path)

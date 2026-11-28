@@ -206,6 +206,11 @@ def _positive_int(value: Any, field: str) -> None:
         raise ValueError(f"{field} must be a positive integer.")
 
 
+def _marker_code(value: Any, field: str) -> None:
+    if type(value) is not int or not 1 <= value <= 255:
+        raise ValueError(f"{field} must be an integer marker code from 1 to 255.")
+
+
 def _rate(value: Any, field: str) -> Fraction:
     try:
         if isinstance(value, bool):
@@ -244,6 +249,7 @@ def normalize_studio_handoff(payload: Mapping[str, Any]) -> dict[str, Any]:
         project = _object(data.get("project"), "project")
         _known_fields(project, _PROJECT_FIELDS, "project")
         _text(project.get("project_id"), "project.project_id")
+        _text(project.get("name"), "project.name")
         _object(data.get("protocol"), "protocol")
         if "session" in data:
             _known_fields(_object(data["session"], "session"), _SESSION_FIELDS, "session")
@@ -420,6 +426,8 @@ def _validate_protocol_semantics(data: Mapping[str, Any], *, strict: bool) -> No
         if strict:
             _known_fields(condition, _CONDITION_FIELDS, field)
             condition_id = _text(condition.get("condition_id"), f"{field}.condition_id")
+            _text(condition.get("name"), f"{field}.name")
+            _marker_code(condition.get("trigger_code"), f"{field}.trigger_code")
             if condition_id in condition_ids:
                 raise ValueError(f"Duplicate Studio condition_id: {condition_id!r}.")
             condition_ids.add(condition_id)
@@ -440,6 +448,7 @@ def _validate_protocol_semantics(data: Mapping[str, Any], *, strict: bool) -> No
     if strict:
         triggers = _object(data.get("triggers"), "triggers")
         _known_fields(triggers, _TRIGGER_FIELDS, "triggers")
+        _marker_code(triggers.get("oddball_trigger_code", 55), "triggers.oddball_trigger_code")
 
 
 def _validate_duration_and_count(value: Mapping[str, Any], field: str) -> None:
@@ -560,15 +569,85 @@ def _validate_acquisition_identity(
     if run_ids != planned_ids or len(set(run_ids)) != len(run_ids):
         raise ValueError("Studio acquisition run order does not match completed_session.ordered_runs.")
     conditions = {
-        _text(item.get("condition_id"), "condition.condition_id"): item.get("name")
+        _text(item.get("condition_id"), "condition.condition_id"): item
         for item in data["conditions"]
     }
     for actual, expected in zip(runs, planned):
         condition_id = _text(expected.get("condition_id"), "completed run.condition_id")
         if condition_id not in conditions or any(
             actual.get(field) != expected.get(field) for field in ("condition_id", "condition_name")
-        ) or expected.get("condition_name") != conditions[condition_id]:
+        ) or expected.get("condition_name") != conditions[condition_id].get("name"):
             raise ValueError("Studio acquisition run condition does not match the project condition.")
+        _validate_completed_markers(
+            actual, expected.get("trigger_events"), recording["effective_backend"],
+            conditions[condition_id], (data.get("triggers") or {}).get("oddball_trigger_code", 55),
+        )
+
+
+def validate_studio_marker_code_map(code_map: Any, expected: Mapping[str, int], problem: str) -> set[str]:
+    """Read either producer spelling of the oddball role in a recorded run's code map."""
+    declared: set[str] = set()
+    if not isinstance(code_map, list) or not code_map:
+        raise ValueError(f"{problem} has an invalid code map.")
+    for raw in code_map:
+        entry = _object(raw, "Studio marker code map entry")
+        label = entry.get("label")
+        role = "oddball_onset" if label == "oddball" else label
+        if (not isinstance(role, str) or role not in expected or role in declared
+                or type(entry.get("code")) is not int or entry["code"] != expected[role]):
+            raise ValueError(f"{problem} has a code map inconsistent with the captured setup.")
+        declared.add(role)
+    return declared
+
+
+def _validate_completed_markers(
+    run: Mapping[str, Any], schedule: Any, backend: str, condition: Mapping[str, Any], oddball_code: int,
+) -> None:
+    """Check local submission evidence when the Studio run carries it."""
+    codes = {"condition_start": condition.get("trigger_code"), "oddball_onset": oddball_code}
+    declared = None
+    if "code_map" in run:
+        declared = validate_studio_marker_code_map(run["code_map"], codes, "Studio marker evidence")
+    if "attempted_events" not in run and "planned_event_count" not in run:
+        return  # Historical summary-only evidence.
+    attempts = run.get("attempted_events")
+    count = run.get("planned_event_count")
+    if not isinstance(attempts, list) or type(count) is not int or len(attempts) != count or not attempts:
+        raise ValueError("Studio marker attempts do not cover the completed run's planned events.")
+    sequences, repeats = condition.get("sequence_count"), condition.get("oddball_cycle_repeats_per_sequence")
+    if type(sequences) is int and type(repeats) is int and count != 1 + sequences * repeats:
+        raise ValueError("Studio marker count conflicts with the captured condition's sequence and repeat counts.")
+    # Older exports can omit the frame schedule even when attempts exist.
+    if schedule is not None and (not isinstance(schedule, list) or (schedule and len(schedule) != count)):
+        raise ValueError("Studio marker schedule length conflicts with the completed run.")
+    previous_index = None
+    previous_frame = -1
+    last_callback = 0.0
+    for position, raw in enumerate(attempts):
+        event = _object(raw, "Studio marker attempt")
+        if event.get("status") != "sent" or event.get("backend_name") != backend:
+            raise ValueError("A Studio marker was not sent through the selected recording transport.")
+        index, frame = event.get("trigger_index"), event.get("frame_index")
+        if (type(index) is not int or index < 0 or (previous_index is not None and index != previous_index + 1)
+                or type(frame) is not int or frame <= previous_frame):
+            raise ValueError("Studio marker indices or frames are out of order.")
+        previous_index, previous_frame = index, frame
+        callback = event.get("time_s")
+        if callback is not None:
+            if (type(callback) not in (int, float) or (type(callback) is float and not isfinite(callback))
+                    or callback < last_callback):
+                raise ValueError("Studio marker callback times are invalid or out of order.")
+            last_callback = callback
+        label = "condition_start" if position == 0 else "oddball_onset"
+        code = codes[label]
+        if (type(event.get("code")) is not int or event["code"] != code or event.get("label") != label
+                or (declared is not None and label not in declared)):
+            raise ValueError("A Studio marker code or label conflicts with its condition or oddball assignment.")
+        if schedule:
+            planned = _object(schedule[position], "Studio planned marker")
+            if (type(planned.get("frame_index")) is not int or type(planned.get("code")) is not int
+                    or (planned["frame_index"], planned["code"], planned.get("label")) != (frame, code, label)):
+                raise ValueError("A Studio marker attempt conflicts with the compiled frame, code or label.")
 
 
 def _recording_backend(value: Any, field: str) -> str:

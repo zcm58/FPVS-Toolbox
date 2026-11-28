@@ -21,8 +21,9 @@ from Main_App.projects.studio_cohort import (
 
 
 def _trigger_codes(setup):
-    codes = setup.get("toolbox", {}).get("event_map", {})
-    return ", ".join(f"{name} {code}" for name, code in codes.items()) or "unavailable"
+    toolbox = setup.get("toolbox")
+    codes = toolbox.get("event_map") if isinstance(toolbox, dict) else None
+    return ", ".join(f"{name} {code}" for name, code in codes.items()) if isinstance(codes, dict) and codes else "unavailable"
 
 
 class StudioCohortReview(AppDialog):
@@ -90,17 +91,22 @@ class StudioCohortReview(AppDialog):
             version = version_key(v)
             reason = v.get("protocol_change_reason") or ""
             short_version = version if not v.get("protocol_version_id") else version[:8]
-            versions[version] = short_version + (" · " + reason if reason else "")
+            versions[version] = short_version + (" · " + reason if isinstance(reason, str) and reason else "")
             information = "Review required" if row.problem else row.status.replace("_", " ").capitalize()
             if review.prior and row.change != "unchanged":
                 information = f"{row.change} · {information}"
             index = self._row(v["participant_number"], v.get("participant_session_number"), short_version, information)
             self.table.item(index, 2).setToolTip(version)
             setup = imported.provenance.get("setups", {}).get(v.get("setup_id"), {}) if hasattr(imported, "provenance") else {}
-            conditions = [run.get("condition_name", "") for run in v.get("runs", ())]
+            conditions = []
+            for run in v.get("runs", ()):
+                name = run.get("condition_name") if isinstance(run, dict) else None
+                conditions.append(name if isinstance(name, str) and name.strip() else "unavailable")
             declaration = v.get("recording") or {}
             hardware = dict(SUPPORTED_ELECTRODE_MONTAGES).get(str(declaration.get("electrode_montage")))
-            hardware = hardware or declaration.get("selected_backend") or "Hardware unknown"
+            hardware = hardware or declaration.get("selected_backend")
+            if not isinstance(hardware, str) or not hardware:
+                hardware = "Hardware unknown"
             refresh = v.get("compiled_refresh_hz")
             refresh_label = f"{refresh:g} Hz" if isinstance(refresh, (float, int)) else "Refresh rate unavailable"
             self.details[index] = "\n".join(filter(None, (
@@ -303,7 +309,7 @@ class StudioCohortReview(AppDialog):
                 elif decision == "excluded":
                     visit_label += " (excluded after QC)"
                 affected.setdefault(version, []).append(visit_label)
-                if not visit.get("setup_id"):
+                if row.problem or not visit.get("setup_id"):
                     continue
                 setup = self.imported.provenance["setups"][visit["setup_id"]]
                 protocol = setup["protocol"]

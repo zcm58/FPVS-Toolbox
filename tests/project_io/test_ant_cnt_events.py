@@ -118,6 +118,7 @@ def test_case_sensitive_companion_is_not_silently_ignored(tmp_path):
 @pytest.mark.parametrize("suffix,payload", [
     (".evt", b""), (".evt", b"not an event library"), (".seg", b""), (".trg", b"bogus"),
     (".seg", b"NumberSegments=3\n43831 0.0 450\n"), (".seg", b"NumberSegments=2\n43831 nan 450\n"),
+    (".seg", b"NumberSegments=2\n43831 60.0 2001\n"),
     (".trg", b"0.001 6\ngarbage\n"), (".trg", b"0.002 6\n0.1 55\n"),
     (".trg", b"0.001 6\n0.2 55\n0.1 1\n"),
 ])

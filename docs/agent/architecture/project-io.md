@@ -322,6 +322,10 @@ When acquisition evidence is present, the importer verifies supported evidence
 and snapshot revisions, successful finalization, matching project/session/
 execution/participant identity and ordered run/condition identity. This
 transport-neutral identity check is separate from the Unicorn code-order adapter.
+For a run with recorded marker attempts, Toolbox checks the local send status,
+transport, condition and oddball codes, marker order, frames and run length.
+It compares those attempts to the compiled schedule when available. Trigger
+indices can continue across conditions; callback times can be absent.
 
 For a Studio EGI DIN run, compare the per-run schedule and trigger log with the
 selected Net Station MFF event track using the [read-only marker diagnostic](eeg-loading-contract.md#egi-din-marker-verification).
@@ -342,6 +346,14 @@ The importer retains relevant source fields in the new project at
 `.fpvs_imports/studio/<source-sha256>.json`. The `tools.studio_import` receipt in
 `project.json` records its portable relative path, source filename/digest,
 producer/document kind and `recording_association="unreviewed"`.
+Repeated JSON keys and condition labels that resolve to the same results
+folder stop the import. Display titles stay intact even when the project
+directory needs a shorter or Windows-compatible name. When a Studio export
+names a recorder but omits the cap, the hardware prompt opens on that recorder.
+A conflicting choice or a changed export requires a fresh review. The project,
+hardware choice, EEG folder and source receipt publish together after review.
+For a visible check, open a completed Unicorn export without a cap, confirm
+Unicorn in the hardware prompt, select the raw folder, then reopen the project.
 When available, `presentation_cadence` retains source rates, the configured estimate,
 and identified run estimates in the provenance file. The receipt keeps a compact
 summary and counts of derived versus total completed runs. The existing import
@@ -398,7 +410,12 @@ reopens the saved evidence without asking for the source file. The
 compatible common declaration can configure processing for the reviewed
 cohort. Changing an existing project's cap requires an explicit decision.
 Each completed run needs a condition ID and matching name from its captured
-setup. A contradictory recorder or effective transport requires review even
+setup. When the roster includes planned markers, attempts, counts or a code
+map, review checks them against that run's own condition and oddball codes
+and its captured sequence and repeat counts. Trigger indices can continue
+across runs and callback times can be absent. Failed sends, incomplete sequences and disagreements about frames or order
+identify the affected run in the review row. Older rosters can omit those fields.
+A contradictory recorder or effective transport requires review even
 when a legacy visit omits the montage. Recording proposals use the entry
 formats supported for that recorder. An all-deferred selection still needs a
 common method to seed the project.
@@ -417,12 +434,18 @@ a project with multiple groups require an explicit group assignment. Batch and
 the dataset index use the reviewed selection. The repeated-session Stats reader
 also verifies the released workbook hash, roster, processing run and QC release.
 
-For a revised whole-study handoff, verify the stable Studio study identity
-against the source retained at first import. A matching title or protocol
+For a revised whole-study handoff, verify the stable Studio study UUID and
+source project ID. Historical manifests recover the project ID from the
+retained handoff. An existing execution keeps its participant and visit number.
+Re-exporting the same roster with different file formatting or producer metadata
+preserves its accepted receipt and current processing result. A matching title or protocol
 alone cannot establish that relationship. Keep the original roster and its
 receipts. Use the saved EEG location and reviewed recording identities to
 preview changes against the last accepted handoff and the last processed cohort.
 Carry forward a match or review only while its source evidence is still valid.
+One physical EEG signal can belong to only one matched visit, including
+retained visits. Duplicate filenames linked to the same BDF or BrainVision
+headers pointing to a common signal require an explicit recording choice.
 BDF matches use the reviewed folder, filename, size, modification time,
 device, file ID and change metadata. Windows adds the native change time when
 the filesystem supplies it, since Python's Windows ctime records creation.

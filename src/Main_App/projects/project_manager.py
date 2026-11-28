@@ -25,7 +25,6 @@ from Main_App.gui.op_guard import OpGuard
 from Main_App.gui.hardware_selection import choose_new_project_hardware
 from Main_App.projects.fpvs_config_import import (
     CONFIG_SUFFIX,
-    FPVSConfigImportError,
     create_project_from_fpvs_config,
     fpvs_config_import_message,
     read_fpvs_config,
@@ -36,7 +35,6 @@ from Main_App.projects.grouping import (
     validate_group_folder_name,
 )
 from Main_App.projects.project import Project
-from Main_App.projects.hardware import confirm_hardware_selection
 from Main_App.projects.recordings import ProjectRecordingContext
 from Main_App.projects.repeated_session_setup import (
     RepeatedSessionProjectSetupError,
@@ -991,25 +989,28 @@ def new_project_from_fpvs_config(self, parent: QWidget | None = None) -> Project
         return None
     hardware_settings = None
     if imported.recording_selection is None:
-        hardware_settings = choose_new_project_hardware(parent, new_project_preprocessing_settings())
+        draft = new_project_preprocessing_settings()
+        if imported.declared_recording_platform:
+            draft["hardware_platform"] = imported.declared_recording_platform
+        hardware_settings = choose_new_project_hardware(parent, draft)
         if hardware_settings is None:
             return None
     try:
-        project = create_project_from_fpvs_config(root, Path(path), imported)
-        if hardware_settings is not None:
-            project.update_preprocessing(confirm_hardware_selection(
-                project.preprocessing, hardware_settings["hardware_platform"], confirmed_change=True,
-            ))
-            project.save()
         input_folder = QFileDialog.getExistingDirectory(
             parent,
             "Select Folder Containing EEG Recordings",
             str(root),
         )
-        if input_folder:
-            project.input_folder = Path(input_folder)
-            project.save()
-    except (FPVSConfigImportError, OSError, ValueError) as exc:
+        project = _run_source_registration_work(
+            parent,
+            lambda: create_project_from_fpvs_config(
+                root, Path(path), imported,
+                confirmed_platform=hardware_settings["hardware_platform"] if hardware_settings else None,
+                input_folder=Path(input_folder) if input_folder else None,
+            ),
+            "Creating project from Studio handoff…",
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
         QMessageBox.critical(parent, "Import Failed", str(exc))
         logger.error(
             "Failed to import FPVS config %s: %s",

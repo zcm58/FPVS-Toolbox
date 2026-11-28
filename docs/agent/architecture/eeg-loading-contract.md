@@ -43,7 +43,11 @@ Exit status 0 means inspection succeeded or the ordered words match. Status 1
 means a mismatch, and 2 indicates invalid input. For a match,
 `cnt_minus_studio_elapsed_ms` measures the difference between elapsed time on
 the recording and Studio clocks after aligning the first marker. Acquisition gaps
-can interrupt that comparison. A photodiode
+are omitted from the native sample clock. The report lists `timing_break_samples`
+from SEG boundaries and recognized discontinuity or connection events. If the
+markers cross a break, the report retains their codes and samples and sets the
+elapsed-time difference to `null` from that sample onward. Timing remains
+available when all markers are in the same continuous segment. A photodiode
 captured on the recording clock is required to measure physical display latency.
 The marker diagnostic leaves source files intact and does not register CNT as
 a processing input. [Studio implementation and verification](https://github.com/zcm58/FPVS-Studio-2.0/blob/codex/ant-mylab-ttl/docs/exec-plans/active/ant-mylab-ttl.md) · [MNE ANT reader](https://mne.tools/1.9/generated/mne.io.read_raw_ant.html)
@@ -80,6 +84,10 @@ or combining simultaneous records.
 
 The JSON report retains the original track rows, including unmapped events,
 and identifies the selected run, condition and compiled marker roles. The
+binary EEG blocks determine the sample count. At fractional sample periods,
+the integer MFF epoch endpoint may truncate once for the recording or once per
+block. Toolbox accepts those representations when the discrepancy stays below
+one sample. Recorded event timestamps retain their original precision. The
 comparison uses the entire selected track in file order, including repeated
 codes and ties. Extra events (including unrelated events in that track),
 missing events, disabled or failed sends, and mismatched codes prevent a match.

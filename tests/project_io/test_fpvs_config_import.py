@@ -181,6 +181,96 @@ def test_create_project_from_fpvs_config_uses_unique_folder(tmp_path) -> None:
     assert project.project_root.name == "Semantic Categories Test 2"
 
 
+@pytest.mark.parametrize("names", [("1 - Faces", "Faces"), ("Hands/Feet", "Hands-Feet"), ("Straße", "STRASSE")])
+def test_import_rejects_conditions_that_share_a_results_folder(tmp_path, names):
+    source = tmp_path / "study.fpvsconfig"
+    _write_fpvs_config(source)
+    payload = json.loads(source.read_bytes())
+    for condition, name in zip(payload["conditions"], names):
+        condition["name"] = name
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(FPVSConfigImportError, match="same output name"):
+        create_project_from_fpvs_config(tmp_path / "Projects", source)
+    assert not (tmp_path / "Projects").exists()
+
+
+def test_changed_export_after_hardware_review_requires_fresh_import(tmp_path):
+    source = tmp_path / "study.fpvsconfig"
+    _write_fpvs_config(source)
+    reviewed = read_fpvs_config(source)
+    _write_fpvs_config(source, title="Different experiment")
+    with pytest.raises(FPVSConfigImportError, match="changed"):
+        create_project_from_fpvs_config(tmp_path / "Projects", source, reviewed)
+    assert not (tmp_path / "Projects").exists()
+
+
+def test_duplicate_json_key_cannot_hide_a_different_marker_code(tmp_path):
+    source = tmp_path / "ambiguous.fpvsconfig"
+    _write_fpvs_config(source)
+    original = source.read_text(encoding="utf-8")
+    source.write_text(original.replace('"trigger_code": 1', '"trigger_code": 1, "trigger_code": 11', 1), encoding="utf-8")
+    with pytest.raises(FPVSConfigImportError, match="Duplicate JSON key: trigger_code"):
+        create_project_from_fpvs_config(tmp_path / "Projects", source)
+    assert not (tmp_path / "Projects").exists()
+
+
+@pytest.mark.parametrize("title", ["CON.notes", "COM¹.session", "Long " + "🧠" * 130])
+def test_nonportable_project_title_keeps_its_original_display_name(tmp_path, title):
+    source = tmp_path / "study.fpvsconfig"
+    _write_fpvs_config(source, title=title)
+    project = create_project_from_fpvs_config(tmp_path / "Projects", source)
+    assert project.name == title
+    assert project.project_root.parent == tmp_path / "Projects"
+    assert project.project_root.name != title
+    assert len(project.project_root.name.encode("utf-8")) <= 255
+
+
+@pytest.mark.parametrize("problem", ["failed", "transport", "duplicate_index", "missing", "frame", "wrong_plan_code",
+                                     "boolean_code", "code_map", "shortened_run", "coincident", "clock_reversal"])
+def test_contradictory_marker_evidence_cannot_create_a_completed_project(tmp_path, problem):
+    source = tmp_path / "completed.fpvsconfig"
+    payload = json.loads((STUDIO_FIXTURES / "v2-completed-biosemi.fpvsconfig").read_bytes())
+    completed = payload["completed_session"]
+    planned = completed["ordered_runs"][0]["trigger_events"]
+    run = completed["acquisition_evidence"]["runs"][0]
+    attempts = run["attempted_events"]
+    if problem == "failed":
+        attempts[2]["status"] = "error"
+    elif problem == "transport":
+        attempts[2]["backend_name"] = "unicorn_udp"
+    elif problem == "duplicate_index":
+        attempts[2]["trigger_index"] = attempts[1]["trigger_index"]
+    elif problem == "missing":
+        attempts.pop(4)
+    elif problem == "frame":
+        attempts[2]["frame_index"] += 1
+    elif problem == "coincident":
+        attempts[1]["frame_index"] = planned[1]["frame_index"] = 0
+    elif problem == "clock_reversal":
+        attempts[2]["time_s"] = attempts[1]["time_s"] / 2
+    elif problem == "wrong_plan_code":
+        attempts[0]["code"] = planned[0]["code"] = 29
+    elif problem == "code_map":
+        run["code_map"][1]["code"] = 29
+    elif problem == "shortened_run":
+        attempts.pop()
+        planned.pop()
+        run["planned_event_count"] -= 1
+    else:
+        attempts[0]["code"] = True
+    source.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(FPVSConfigImportError, match="marker"):
+        create_project_from_fpvs_config(tmp_path / "Projects", source)
+    assert not (tmp_path / "Projects").exists()
+
+
+@pytest.mark.parametrize("filename", ["v2-completed-acticap-128.fpvsconfig", "v2-completed-unicorn.fpvsconfig"])
+def test_operator_cannot_replace_declared_recorder_during_import(tmp_path, filename):
+    with pytest.raises(FPVSConfigImportError, match="recording system"):
+        create_project_from_fpvs_config(tmp_path / "Projects", STUDIO_FIXTURES / filename, confirmed_platform="biosemi")
+    assert not (tmp_path / "Projects").exists()
+
+
 def test_read_fpvs_config_rejects_duplicate_condition_names(tmp_path) -> None:
     config_path = tmp_path / "project.fpvsconfig"
     _write_fpvs_config(config_path)

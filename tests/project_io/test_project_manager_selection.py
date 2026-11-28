@@ -165,26 +165,45 @@ def test_input_folder_failed_save_preserves_source_and_allows_retry(workflow, tm
 
 
 @pytest.mark.parametrize("failure", [OSError("Cannot save project"), ValueError("Invalid hardware policy")])
-def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_path, failure):
+def test_studio_import_hardware_save_error_keeps_current_project(workflow, tmp_path, monkeypatch, failure):
     current_project = object()
     loaded = []
     host = SimpleNamespace(currentProject=current_project, loadProject=loaded.append)
-    workflow["ensure_projects_root"] = lambda _parent: tmp_path
-    workflow["QFileDialog"] = SimpleNamespace(getOpenFileName=lambda *_: (str(tmp_path / "study.fpvsconfig"), ""))
+    source = Path(__file__).parents[1] / "fixtures/studio_handoff/v2-completed-biosemi.fpvsconfig"
+    projects = tmp_path / "projects"
+    workflow["ensure_projects_root"] = lambda _parent: projects
+    workflow["QFileDialog"] = SimpleNamespace(
+        getOpenFileName=lambda *_: (str(source), ""), getExistingDirectory=lambda *_: "",
+    )
     workflow["choose_new_project_hardware"] = lambda _host, settings: confirm_hardware_selection(
-        settings, "brain_products", confirmed_change=True,
+        settings, "biosemi", confirmed_change=True,
     )
 
-    def fail_save():
+    def fail_save(*args, **kwargs):
         raise failure
 
-    imported_project = SimpleNamespace(preprocessing={}, update_preprocessing=lambda _settings: None, save=fail_save)
-    workflow["create_project_from_fpvs_config"] = lambda *_: imported_project
-    workflow["read_fpvs_config"] = lambda _path: SimpleNamespace(provenance={}, recording_selection=None)
+    monkeypatch.setattr(Project, "save", fail_save)
+    workflow["create_project_from_fpvs_config"] = create_project_from_fpvs_config
     assert workflow["new_project_from_fpvs_config"](host) is None
     assert host.currentProject is current_project
     assert loaded == []
     assert workflow["messages"] == [("Import Failed", str(failure))]
+    assert not list(projects.iterdir())
+
+
+def test_no_cap_studio_import_prompts_with_its_captured_unicorn_recorder(workflow, tmp_path):
+    source = Path(__file__).parents[1] / "fixtures/studio_handoff/v2-completed-unicorn.fpvsconfig"
+    loaded = []
+    host = SimpleNamespace(loadProject=loaded.append)
+    workflow["ensure_projects_root"] = lambda _: tmp_path
+    workflow["QFileDialog"] = SimpleNamespace(getOpenFileName=lambda *_: (str(source), ""), getExistingDirectory=lambda *_: "")
+    def review_hardware(_, settings):
+        assert settings["hardware_platform"] == "unicorn"
+        return settings
+    workflow["choose_new_project_hardware"] = review_hardware
+    workflow["create_project_from_fpvs_config"] = create_project_from_fpvs_config
+    project = workflow["new_project_from_fpvs_config"](host)
+    assert Project.load(project.project_root).preprocessing["hardware_platform"] == "unicorn"
 
 
 @pytest.mark.parametrize("select_raw", [False, True])

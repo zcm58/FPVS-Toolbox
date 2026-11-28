@@ -56,6 +56,153 @@ def _write_brainvision_recording(header):
     data.write_bytes(bytes(40))
 
 
+@pytest.mark.parametrize("shared", ["bdf", "brainvision"])
+def test_one_physical_signal_cannot_be_selected_twice_even_under_different_names(tmp_path, shared):
+    source = make_source()
+    source["visits"] = source["visits"][:2]
+    raw = tmp_path / "recordings"
+    raw.mkdir()
+    if shared == "bdf":
+        hardware = "biosemi"
+        first, second = (raw / name for name in ("P001.bdf", "P002.bdf"))
+        first.write_bytes(b"synthetic signal")
+        os.link(first, second)
+    else:
+        hardware = "brain_products"
+        first, second = (raw / name for name in ("P001.vhdr", "P002.vhdr"))
+        _write_brainvision_recording(first)
+        second.write_bytes(first.read_bytes())
+        for index in range(2):
+            _set_brainvision_cap(source, index, "brainproducts_acticap_gacs_64")
+    imported = write_source(tmp_path, source)
+    review = review_study(imported, raw)
+    assert [r.status for r in review.rows] == ["ambiguous", "ambiguous"]
+    projects = tmp_path / "projects"
+    versions = [source["visits"][0]["protocol_version_id"]]
+    both = {"exec-1": ("matched", first.name), "exec-2": ("matched", second.name)}
+    with pytest.raises(ValueError, match="same EEG signal"):
+        commit_study_review(projects, imported, review, decisions=both, omissions={}, versions=versions,
+                            hardware=hardware)
+    assert not projects.exists()
+    project = commit_study_review(projects, imported, review, decisions={**both, "exec-2": ("awaiting_eeg", None)},
+                                  omissions={}, versions=versions, hardware=hardware)
+    manifest = project.project_root / "project.json"
+    before = manifest.read_bytes()
+    legacy = json.loads(before)
+    second_entry = legacy["tools"]["studio_cohort"]["visits"]["exec-2"]
+    second_entry.update(decision="matched", raw_file=second.name, **review.files[second.name])
+    manifest.write_text(json.dumps(legacy), encoding="utf-8")
+    assert [row.status for row in review_study(imported, raw, project).rows] == ["ambiguous", "ambiguous"]
+    manifest.write_bytes(before)
+    source["visits"].pop(0)
+    source["roster_sequence"] += 1
+    changed = write_source(tmp_path, source)
+    with pytest.raises(ValueError, match="same EEG signal"):
+        commit_study_review(projects, changed, review_study(changed, raw, project), existing=project,
+                            decisions={"exec-2": both["exec-2"]}, omissions={"exec-1": "retain"}, versions=versions)
+    assert manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["second condition code", "failed send", "missing attempt", "different frame",
+                                   "out-of-order send", "missing index", "wrong code map", "truncated run", "clean"])
+def test_each_cohort_run_must_agree_with_its_own_condition_and_recorded_sends(tmp_path, fault):
+    source = make_source()
+    setup = next(iter(source["setups"].values()))
+    setup["conditions"][0]["oddball_cycle_repeats_per_sequence"] = 12
+    setup["conditions"].append(dict(setup["conditions"][0], name="Faces", condition_id="faces", trigger_code=2))
+    setup["toolbox"]["event_map"]["Faces"] = 2
+    key = digest(setup)
+    source["setups"] = {key: setup}
+    for visit in source["visits"]:
+        visit["setup_id"] = key
+    runs = source["visits"][0]["runs"]
+    runs.append(dict(runs[0], run_id="run-2", condition_name="Faces", condition_id="faces"))
+    for code, run in enumerate(runs, start=1):
+        markers = [[0, code, "condition_start"], *[[10 * n, 55, "oddball_onset"] for n in range(1, 13)]]
+        # Studio keeps session-wide trigger indices and permits missing callback times.
+        offset = 0 if code == 1 else 13
+        run.update(planned_markers=markers, attempted_markers=[[offset + n, *m, n * 0.2 if n else None, "sent"]
+                                                               for n, m in enumerate(markers)],
+                   code_map=[{"code": code, "label": "condition_start"}, {"code": 55, "label": "oddball"}],
+                   planned_event_count=len(markers), sent_events=len(markers), error_events=0)
+    if fault == "second condition code":
+        runs[1]["planned_markers"][0][1] = 1
+        runs[1]["attempted_markers"][0][2] = 1
+    elif fault == "failed send":
+        runs[1]["attempted_markers"][1][-1] = "error"
+    elif fault == "missing attempt":
+        runs[1]["attempted_markers"].pop()
+    elif fault == "different frame":
+        runs[1]["attempted_markers"][1][1] += 1
+    elif fault == "out-of-order send":
+        runs[1]["attempted_markers"][2][4] = 0
+    elif fault == "missing index":
+        runs[1]["attempted_markers"][1][0] += 1
+    elif fault == "wrong code map":
+        runs[1]["code_map"][0]["code"] = 1
+    elif fault == "truncated run":
+        for field in ("planned_markers", "attempted_markers"):
+            runs[1][field].pop()
+        runs[1].update(planned_event_count=12, sent_events=12)
+    imported = write_source(tmp_path, source)
+    (tmp_path / "P001.bdf").write_bytes(b"synthetic")
+    review = review_study(imported, tmp_path)
+    decisions = {r.visit["visit_id"]: ("awaiting_eeg", None) for r in review.rows}
+    decisions["exec-1"] = ("matched", "P001.bdf")
+    options = dict(decisions=decisions, omissions={}, versions=[source["visits"][0]["protocol_version_id"]], hardware="biosemi")
+    if fault == "clean":
+        assert review.rows[0].status == "clear"
+        assert len(commit_study_review(tmp_path / "projects", imported, review, **options).recordings) == 1
+    else:
+        assert review.rows[0].status == "exception" and "Faces (run-2)" in review.rows[0].problem
+        with pytest.raises(ValueError, match="compatible evidence"):
+            commit_study_review(tmp_path / "projects", imported, review, **options)
+        assert not (tmp_path / "projects").exists()
+
+
+@pytest.mark.parametrize("historical", [True, False])
+def test_same_roster_reexport_preserves_release_and_revisions_cannot_reassign_identity(tmp_path, historical):
+    source = make_source()
+    source["visits"] = source["visits"][:1]
+    imported = write_source(tmp_path, source)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "P001.bdf").write_bytes(b"synthetic")
+    options = dict(decisions={"exec-1": ("matched", "P001.bdf")}, omissions={},
+                   versions=[source["visits"][0]["protocol_version_id"]], hardware="biosemi")
+    root = tmp_path / "projects"
+    project = commit_study_review(root, imported, review_study(imported, raw), **options)
+    path = project.project_root / "project.json"
+    manifest = json.loads(path.read_bytes())
+    receipt = manifest["tools"]["studio_cohort"]
+    if historical:
+        del receipt["project_id"]
+    receipt["current_result"] = {"processing_run_id": "keep-this-result"}
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    before = path.read_bytes()
+    source["producer"] = {"application": "FPVS Studio", "version": "2.8.3"}
+    reexported = write_source(tmp_path, source)
+    assert reexported.source_sha256 != imported.source_sha256
+    commit_study_review(root, reexported, review_study(reexported, raw, project), existing=project, **options)
+    assert path.read_bytes() == before
+    source["roster_sequence"] += 1
+    visit = source["visits"][0]
+    for field, other in (("participant_number", "009"), ("participant_session_number", 2)):
+        prior = visit[field]
+        visit[field] = other
+        with pytest.raises(ValueError, match="execution exec-1 changed participant or visit number"):
+            review_study(write_source(tmp_path, source), raw, project)
+        visit[field] = prior
+    source["project_id"] = "other-study"
+    setup = source["setups"].pop(visit["setup_id"])
+    setup["project"]["project_id"] = source["project_id"]
+    visit["setup_id"] = digest(setup)
+    source["setups"][visit["setup_id"]] = setup
+    with pytest.raises(ValueError, match="different Studio project"):
+        review_study(write_source(tmp_path, source), raw, project)
+    assert path.read_bytes() == before
+
+
 def test_study_cap_uses_selected_visits_and_keeps_later_project_edits(tmp_path):
     source = make_source()
     cap64, cap128 = "brainproducts_acticap_gacs_64", "brainproducts_acticap_gacs_128"

@@ -67,6 +67,31 @@ def test_nanosecond_epoch_and_timestamp_preserve_duration(tmp_path):
     assert (event.onset_ns, event.sample, event.duration) == (4_000_000, 4, 1000)
 
 
+@pytest.mark.parametrize(("block_samples", "blocks", "end_us", "valid"), [
+    (519, 2, 2_027_342, True),   # Native writer truncates each block to microseconds.
+    (519, 2, 2_027_343, True),   # Writer truncates the complete epoch once.
+    (519, 2, 2_027_341, False),  # Neither representation matches the source grid.
+    (7, 3000, 13_671 * 3000, False),  # Accumulated truncation exceeds a whole sample.
+])
+def test_fractional_sample_period_keeps_exact_grid_and_last_sample(tmp_path, block_samples, blocks, end_us, valid):
+    rate = 512
+    last_ns = (blocks * block_samples * 10**9 - 1) // rate
+    recording = write_mff_fixture(tmp_path / "clock.mff", [("DIN1", last_ns)])
+    size = block_samples * 4
+    first_header = struct.pack("<7I", 1, 28, size, 1, 0, rate << 8 | 32, 0)
+    (recording / "signal1.bin").write_bytes(first_header + bytes(size) + (bytes(4 + size) * (blocks - 1)))
+    epochs = recording / "epochs.xml"
+    epochs.write_text(epochs.read_text().replace("2000000<", f"{end_us}<")
+                      .replace("<lastBlock>2<", f"<lastBlock>{blocks}<"))
+    if valid:
+        result = _inspect(recording)
+        assert result.sample_count == block_samples * blocks
+        assert (result.events[0].sample, result.events[0].onset_ns) == (result.sample_count - 1, last_ns)
+    else:
+        with pytest.raises(RecordingEventError, match="Epoch timing"):
+            _inspect(recording)
+
+
 @pytest.mark.parametrize(("filename", "old", "new", "message"), [
     ("epochs.xml", "<endTime>2000000", "<endTime>1000000", "disagrees"),
     ("epochs.xml", "<beginTime>0", "<beginTime>10", "continuous"),

@@ -9,6 +9,7 @@ from copy import deepcopy
 import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 import re
 import tempfile
@@ -21,6 +22,7 @@ from Main_App.projects.raw_identity import infer_raw_participant_id
 from Main_App.projects.studio_archive import archive_reviewed_result, studio_evidence_path
 from Main_App.projects.studio_handoff import (
     STUDIO_MARKER_DIAGNOSTICS, STUDIO_RECORDER_PLATFORMS, StudioRecordingSelection, studio_recording_selection,
+    validate_studio_marker_code_map,
 )
 
 FORMAT = "fpvs-study-handoff"
@@ -46,6 +48,7 @@ def validate_study_handoff(source: Mapping[str, Any]) -> tuple[dict, dict]:
         raise FPVSConfigImportError("Missing or invalid Studio source-study UUID.") from exc
     visits, setups = source.get("visits"), source.get("setups")
     if (not isinstance(visits, list) or not visits or not isinstance(setups, dict)
+            or not isinstance(source.get("project_id"), str) or not source["project_id"].strip()
             or not isinstance(source.get("project_title"), str) or not source["project_title"].strip()
             or source.get("collection_complete") is not True
             or type(source.get("roster_sequence")) is not int or source["roster_sequence"] < 1
@@ -133,6 +136,61 @@ def _visit_selection(source, visit) -> StudioRecordingSelection | None:
     return studio_recording_selection(source["setups"][visit["setup_id"]], as_run=visit.get("recording") or {})
 
 
+def _validate_run_markers(run, condition_code, oddball_code, condition):
+    """Reconcile the compact as-run marker records when a Studio roster carries them."""
+    expected = {"condition_start": condition_code, "oddball_onset": oddball_code}
+    problem = f"Studio marker evidence for {run['condition_name']} ({run['run_id']})"
+    sequences, repeats = condition.get("sequence_count"), condition.get("oddball_cycle_repeats_per_sequence")
+    expected_count = 1 + sequences * repeats if type(sequences) is int and type(repeats) is int else None
+    for key in ("planned_event_count", "sent_events", "error_events"):
+        if key in run and (type(run[key]) is not int or run[key] < 0):
+            raise ValueError(f"{problem} has an invalid {key}.")
+    if expected_count is not None and any(
+        run[k] != expected_count for k in ("planned_event_count", "sent_events") if k in run
+    ):
+        raise ValueError(f"{problem} has a marker count that conflicts with the captured condition.")
+    if run.get("error_events") or ("sent_events" in run and "planned_event_count" in run
+                                  and run["sent_events"] != run["planned_event_count"]):
+        raise ValueError(f"{problem} reports missing or failed sends.")
+    declared = validate_studio_marker_code_map(run["code_map"], expected, problem) if "code_map" in run else None
+    for key in ("planned_markers", "attempted_markers"):
+        if key not in run:
+            continue
+        markers = run[key]
+        if (not isinstance(markers, list) or not markers
+                or (expected_count is not None and len(markers) != expected_count)
+                or any(len(markers) != run[k] for k in ("planned_event_count", "sent_events") if k in run)):
+            raise ValueError(f"{problem} has an incomplete {key} list.")
+        last_frame, last_time = -1, 0
+        last_index = None
+        attempted = key == "attempted_markers"
+        for i, marker in enumerate(markers):
+            if not isinstance(marker, list) or len(marker) != (6 if attempted else 3):
+                raise ValueError(f"{problem} has an invalid {key} entry.")
+            if attempted:
+                index, frame, code, label, elapsed, status = marker
+                if (type(index) is not int or index < 0 or (last_index is not None and index != last_index + 1)
+                        or status != "sent"):
+                    raise ValueError(f"{problem} has a failed or out-of-order marker attempt.")
+                last_index = index
+                if elapsed is not None:
+                    if (type(elapsed) not in (int, float) or (type(elapsed) is float and not math.isfinite(elapsed))
+                            or elapsed < last_time):
+                        raise ValueError(f"{problem} has an invalid or out-of-order callback time.")
+                    last_time = elapsed
+            else:
+                frame, code, label = marker
+            role = "condition_start" if i == 0 else "oddball_onset"
+            if (type(frame) is not int or frame <= last_frame or type(code) is not int or label != role
+                    or code != expected[role] or (declared is not None and role not in declared)):
+                raise ValueError(f"{problem} has a {key} entry inconsistent with the captured condition.")
+            last_frame = frame
+    if "planned_markers" in run and "attempted_markers" in run:
+        planned, attempted = run["planned_markers"], run["attempted_markers"]
+        if len(planned) != len(attempted) or any(p != a[1:4] for p, a in zip(planned, attempted)):
+            raise ValueError(f"{problem} has sends that differ from its planned marker sequence.")
+
+
 def study_recording_consensus(source) -> tuple[str | None, StudioRecordingSelection | None]:
     """Resolve recorder and montage agreement independently across captured visits."""
     selections = set()
@@ -189,10 +247,11 @@ class StudyReview:
     unreadable: dict[str, str] = field(default_factory=dict)
     source_sha256: str = ""
     existing_root: Path | None = None
+    signal_ids: dict = field(default_factory=dict)
 
 
-def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None) -> tuple[dict[str, dict], dict[str, str]]:
-    files, unreadable = {}, {}
+def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None):
+    files, unreadable, signal_ids = {}, {}, {}
     for path in sorted(folder.rglob("*")):
         if not is_eeg_recording_file(path) or not path.is_file():
             continue
@@ -211,16 +270,20 @@ def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None) ->
             if components:
                 header = components["recording_sources"][0]
                 identity = [header["size"], header["mtime_ns"]]
+                signal = Path(components["recording_sources"][1]["path"])
+                stat = signal.stat()
             else:
+                signal = path
                 stat = path.stat()
                 identity = [stat.st_size, stat.st_mtime_ns]
                 if hash_names is None or name in hash_names:
                     components["bdf_change_identity"] = bdf_change_identity(path, stat)
+            signal_ids[name] = (stat.st_dev, stat.st_ino) if stat.st_ino else signal.resolve()
         except (OSError, ValueError) as exc:
             unreadable[name] = str(exc)
             continue
         files[name] = {"file_identity": identity, **components}
-    return files, unreadable
+    return files, unreadable, signal_ids
 
 
 def _same_reviewed_recording(visit: Mapping, files: Mapping) -> bool:
@@ -237,6 +300,23 @@ def _compatible_recording(name: str, platform: str | None) -> bool:
     return suffix in {".vhdr", ".bvrh"} if platform == "brain_products" else (
         platform in {"biosemi", "biosemi_active_three", "unicorn"} and suffix == ".bdf"
     )
+
+
+def _accepted_project_id(previous, imported, root):
+    if "project_id" in previous:
+        return previous["project_id"]
+    # Projects created before the manifest kept this field still retain the source export.
+    original = next(iter(previous.get("history", ())), previous)
+    if original["source_sha256"] == imported.source_sha256:
+        return imported.provenance["project_id"]
+    try:
+        evidence = json.loads(studio_evidence_path(root, original["source_sha256"]).read_bytes())
+        if (evidence["source_sha256"] == original["source_sha256"]
+                and evidence["handoff"]["study_id"] == previous["study_id"]):
+            return evidence["handoff"]["project_id"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    raise ValueError("Restore the accepted Studio study export before reviewing a different handoff.")
 
 
 def review_study(imported, folder: Path, existing=None, *, hardware: str | None = None) -> StudyReview:
@@ -256,22 +336,35 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
     if previous:
         if previous["study_id"] != source["study_id"]:
             raise ValueError("This analysis project belongs to a different Studio study.")
+        if _accepted_project_id(previous, imported, existing.project_root) != source["project_id"]:
+            raise ValueError("The revised study names a different Studio project.")
         if (source["roster_sequence"] < previous["roster_sequence"] or
                 source["roster_sequence"] == previous["roster_sequence"] and source["roster_revision"] != previous["roster_revision"]):
             raise ValueError("This handoff predates or conflicts with the accepted roster. Export the latest study.")
-    files, unreadable = _recording_inventory(folder)
+    files, unreadable, signal_ids = _recording_inventory(folder)
+    signal_counts = Counter(signal_ids.values())
     by_pid: dict[str, list[str]] = {}
     for name in files:
         by_pid.setdefault(_pid(infer_raw_participant_id(name)), []).append(name)
     visits = source["visits"]
     counts = Counter(_pid(v["participant_number"]) for v in visits)
     prior_visits = previous.get("visits", {})
+    matched_signals = Counter(signal_ids[v["raw_file"]] for v in prior_visits.values()
+                              if v["decision"] == "matched" and v.get("raw_file") in signal_ids)
+    overlapping = {key for key, v in prior_visits.items() if v["decision"] == "matched"
+                   and matched_signals[signal_ids.get(v.get("raw_file"))] > 1}
     same_folder = bool(previous) and Path(previous["raw_folder"]) == folder
     prior_people = {v["participant_number"] for v in prior_visits.values()}
+    methods = {}
     rows = []
     for visit in visits:
         key = visit["visit_id"]
         prior = prior_visits.get(key, {})
+        if prior.get("execution_id") and any(
+            prior.get(field) is not None and prior[field] != visit.get(field)
+            for field in ("participant_number", "participant_session_number")
+        ):
+            raise ValueError(f"Studio execution {key} changed participant or visit number. Check the source roster.")
         pid = _pid(visit["participant_number"])
         platform = _hardware(visit)
         candidates = tuple(name for name in by_pid.get(pid, ()) if _compatible_recording(name, platform))
@@ -285,8 +378,14 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
             reason = "Unsupported participant identifier"
         else:
             try:
-                _method(source["setups"][visit["setup_id"]])
+                setup_id = visit["setup_id"]
+                if setup_id not in methods:
+                    setup = source["setups"][setup_id]
+                    methods[setup_id] = _method(setup), {c["condition_id"]: c for c in setup["conditions"]}
+                (event_map, _, oddball), conditions = methods[setup_id]
                 selection = _visit_selection(source, visit)
+                for run in visit["runs"]:
+                    _validate_run_markers(run, event_map[run["condition_name"].strip()], oddball, conditions[run["condition_id"]])
                 if hardware and platform != hardware:
                     reason = f"Recorded hardware {platform or 'unknown'} differs from project hardware {hardware}"
                 elif selection and existing and not selection.matches(existing.preprocessing):
@@ -294,22 +393,24 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
             except ValueError as exc:
                 reason = str(exc)
         stable_match = same_folder and _same_reviewed_recording(prior, files)
-        if change == "unchanged" and ((stable_match and not reason) or prior.get("decision") in {"awaiting_eeg", "excluded"}):
+        if key in overlapping and not reason:
+            status = "ambiguous"
+        elif change == "unchanged" and ((stable_match and not reason) or prior.get("decision") in {"awaiting_eeg", "excluded"}):
             status = prior["decision"]
         elif reason:
             status = "exception"
         elif prior.get("decision") == "matched" and not stable_match:
             status = "reconfirm_recording"
-        elif len(candidates) == 1 and counts[pid] == 1:
+        elif len(candidates) == 1 and counts[pid] == 1 and signal_counts[signal_ids[candidates[0]]] == 1:
             status = "clear"
         else:
             status = "ambiguous" if candidates else "missing"
         rows.append(ReviewRow(visit, prior, candidates, status, change, reason))
     ids = {row.visit["visit_id"] for row in rows}
     omitted = {key: row for key, row in prior_visits.items() if key not in ids and (
-        row.get("in_source_roster", True) or _retained_recording_needs_review(row, files, same_folder))}
+        row.get("in_source_roster", True) or key in overlapping or _retained_recording_needs_review(row, files, same_folder))}
     return StudyReview(tuple(rows), files, omitted, folder, baseline, previous, unreadable,
-                       imported.source_sha256, existing.project_root if existing is not None else None)
+                       imported.source_sha256, existing.project_root if existing is not None else None, signal_ids)
 
 
 def _hardware(visit):
@@ -431,12 +532,12 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
     if any(v["decision"] == "matched" and version_key(v) in versions and v.get("method_sha256") != digest(signature)
            for v in matches.values()):
         raise ValueError("Retained visits use a method incompatible with the selected analysis.")
-    if sum(r.get("raw_file") is not None and r["decision"] == "matched" for r in matches.values()) != len(
-            {r["raw_file"] for r in matches.values() if r["decision"] == "matched"}):
-        raise ValueError("A retained visit already owns this EEG recording.")
+    selected_signals = [review.signal_ids[r["raw_file"]] for r in matches.values() if r["decision"] == "matched"]
+    if len(selected_signals) != len(set(selected_signals)):
+        raise ValueError("The same EEG signal cannot be matched to multiple Studio visits, including retained visits.")
     state = {
         **({"website_study": dict(source["website_study"])} if source.get("website_study") else {}),
-        "study_id": source["study_id"], "roster_revision": source["roster_revision"],
+        "study_id": source["study_id"], "project_id": source["project_id"], "roster_revision": source["roster_revision"],
         "roster_sequence": source["roster_sequence"], "raw_folder": str(review.folder),
         "versions": sorted(versions), "mixed_version_confirmations": list(warnings) if len(versions) > 1 else [],
         "visits": matches, "source_sha256": imported.source_sha256,
@@ -476,8 +577,8 @@ def commit_study_review(projects_root, imported, review, *, decisions, omissions
     present = {row.visit["visit_id"] for row in review.rows}
     hash_names.update(visit["raw_file"] for key, visit in review.prior.get("visits", {}).items()
                       if key not in present and visit["decision"] == "matched" and omissions.get(key) != "archive")
-    files, _ = _recording_inventory(review.folder, hash_names=hash_names)
-    if files.keys() != review.files.keys() or any(
+    files, _, signal_ids = _recording_inventory(review.folder, hash_names=hash_names)
+    if files.keys() != review.files.keys() or any(signal_ids.get(k) != review.signal_ids.get(k) for k in hash_names) or any(
         any(review.files[name].get(k) != v for k, v in current.items()) for name, current in files.items()
     ):
         raise ValueError("The EEG folder changed after review. Reopen the roster to check its matches.")
@@ -587,7 +688,10 @@ def _publish(root, imported, review, state, setup, hardware, group_assignments, 
         current = Project(root, manifest)
         if selection and (selection.platform != hardware or previous and not selection.matches(current.preprocessing)):
             raise ValueError(f"Studio montage {selection.label} conflicts with the project recording settings.")
-        if previous and all(previous.get(key) == value for key, value in state.items()):
+        # A fresh export may serialize the same accepted roster differently.
+        # Source project identity was checked in review, including for historical receipts.
+        if (previous and previous.get("website_study") == state.get("website_study")
+                and all(previous.get(key) == value for key, value in state.items() if key not in {"source_sha256", "project_id"})):
             return current
         registry = manifest.setdefault("tools", {})
         history = list(previous.get("history", ()))

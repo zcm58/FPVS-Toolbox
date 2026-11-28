@@ -60,6 +60,16 @@ def test_new_project_hardware_dialog_cancellation_returns_no_draft(monkeypatch):
     assert settings == {"existing": "kept"}
 
 
+def test_new_project_hardware_prompt_opens_on_imported_recorder(monkeypatch):
+    def accept_default(parent, title, label, choices, initial, editable):
+        assert choices[initial] == "Unicorn Hybrid Black"
+        return choices[initial], True
+
+    monkeypatch.setattr(hardware_selection.QInputDialog, "getItem", accept_default)
+    draft = hardware_selection.choose_new_project_hardware(None, {"hardware_platform": "unicorn"})
+    assert draft["hardware_platform"] == "unicorn"
+
+
 @pytest.mark.parametrize("platform,montage,incompatible", [
     ("brain_products", "brainproducts_acticap_gacs_64", "biosemi128"),
     ("biosemi_active_three", "biosemi128", "brainproducts_acticap_gacs_128"),

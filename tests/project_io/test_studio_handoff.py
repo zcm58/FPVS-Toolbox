@@ -192,6 +192,24 @@ def test_active_three_retains_its_serial_transport(handoff):
     assert normalize_studio_handoff(handoff) == handoff
 
 
+@pytest.mark.parametrize("field", ["name", "trigger_code"])
+def test_completed_condition_with_missing_metadata_is_a_compatibility_error(handoff, field):
+    _completion(handoff)
+    del handoff["conditions"][0][field]
+    with pytest.raises(ValueError, match=field):
+        normalize_studio_handoff(handoff)
+
+
+@pytest.mark.parametrize("value", [0, 256, "2", True])
+def test_current_setup_requires_byte_codes_for_condition_and_oddball(handoff, value):
+    for row, field in ((handoff["conditions"][0], "trigger_code"), (handoff["triggers"], "oddball_trigger_code")):
+        original = row[field]
+        row[field] = value
+        with pytest.raises(ValueError, match="1 to 255"):
+            normalize_studio_handoff(handoff)
+        row[field] = original
+
+
 @pytest.mark.parametrize("source", ["setup", "completed", "completed_snapshot_only"])
 @pytest.mark.parametrize(("backend", "settings", "diagnostic"), [
     ("egi_din", {"egi_parallel_address": 0x378, "egi_pulse_width_ms": 10}, "verify_egi_din"),

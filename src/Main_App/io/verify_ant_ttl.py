@@ -30,6 +30,15 @@ def main(argv: list[str] | None = None) -> int:
                 candidates, args.studio_run, backend="ant_mylab_ttl", recording_format="cnt",
                 sampling_rate_hz=inspection.sampling_rate_hz,
             )
+            aligned = comparison.get("aligned_markers")
+            if aligned:
+                first, last = aligned[0]["cnt_sample"], aligned[-1]["cnt_sample"]
+                boundary = next((s for s in inspection.timing_break_samples if first < s <= last), None)
+                if boundary is not None:
+                    comparison["elapsed_time_discontinuous_from_sample"] = boundary
+                    for row in aligned:
+                        if row["cnt_sample"] >= boundary:
+                            row["cnt_minus_studio_elapsed_ms"] = None
             report["comparison"] = comparison
             matched = comparison["status"] == "ordered_marker_match"
         json.dump(report, sys.stdout, ensure_ascii=True, indent=2)

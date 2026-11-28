@@ -12,6 +12,8 @@ from typing import Literal
 
 from .recording_events import RecordingEventError
 
+_CONNECTION_CHANGES = {"amplifier disconnected", "amplifier reconnected"}
+
 
 @dataclass(frozen=True)
 class AntCntEvent:
@@ -37,6 +39,7 @@ class AntCntInspection:
     sample_count: int
     companion_files: tuple[str, ...]
     events: tuple[AntCntEvent, ...]
+    timing_break_samples: tuple[int, ...] = ()
 
 
 def _container(path: Path) -> str:
@@ -66,7 +69,7 @@ def _event(order: int, row: list, rate: int, count: int) -> AntCntEvent:
     kind: Literal["stimulus", "recorder", "unclassified"] = "unclassified"
     studio_code = None
     word = code.strip()
-    state_change = (condition or "").casefold() in ("amplifier disconnected", "amplifier reconnected")
+    state_change = (condition or "").casefold() in _CONNECTION_CHANGES
     if (impedance is not None or (description or "").casefold() == "impedance" or state_change
             or word in ("__", "Rs") or (word == "1000" and condition)):
         kind = "recorder"
@@ -74,6 +77,29 @@ def _event(order: int, row: list, rate: int, count: int) -> AntCntEvent:
         kind, studio_code = "stimulus", int(word)
     return AntCntEvent(order, code, sample, (sample * 10**9 + rate // 2) // rate, duration,
                        condition, description, impedance, kind, studio_code)
+
+
+def _later_segment_lengths(path: Path) -> list[int]:
+    """The SEG table describes every recorded segment after the first."""
+    try:
+        with path.open("rb") as stream:
+            key, count = stream.readline(1024).split(b"=", 1)
+            segments = int(count)
+            if key != b"NumberSegments" or segments < 1:
+                raise ValueError
+            lengths = []
+            for row in stream:
+                if row.strip():
+                    date, fraction, n_samples = row.split()
+                    length = int(n_samples)
+                    if not all(math.isfinite(float(n)) for n in (date, fraction)) or length <= 0:
+                        raise ValueError
+                    lengths.append(length)
+            if len(lengths) != segments - 1:
+                raise ValueError
+            return lengths
+    except ValueError as exc:
+        raise RecordingEventError(f"Incomplete or unrecognized ANT companion: {path.name}") from exc
 
 
 def _check_companion(path: Path) -> tuple[float, int] | None:
@@ -88,24 +114,6 @@ def _check_companion(path: Path) -> tuple[float, int] | None:
             return None
         header = stream.readline(1024)
         try:
-            if suffix == ".seg":
-                key, count = header.split(b"=", 1)
-                segments = int(count)
-                if key != b"NumberSegments" or segments < 1:
-                    raise ValueError
-                # Segment zero starts at the CNT header time. The remaining
-                # rows locate successive segments on the original event clock.
-                rows = 0
-                for row in stream:
-                    if not row.strip():
-                        continue
-                    date, fraction, n_samples = row.split()
-                    if not all(math.isfinite(float(n)) for n in (date, fraction)) or int(n_samples) <= 0:
-                        raise ValueError
-                    rows += 1
-                if rows != segments - 1:
-                    raise ValueError
-                return None
             period_field, block_size, *_ = header.split()
             period = float(period_field)
             if not math.isfinite(period) or period <= 0 or int(block_size) <= 0:
@@ -149,15 +157,19 @@ def read_ant_cnt_events(path: str | Path) -> AntCntInspection:
     expected_names = {entry.name.casefold(): entry for entry in expected}
     companions = []
     trg_grid = None
+    later_segments: list[int] = []
     for sibling in path.parent.iterdir():
         candidate = expected_names.get(sibling.name.casefold())
         if candidate is None:
             continue
         if not candidate.is_file() or not candidate.samefile(sibling):
             raise RecordingEventError(f"ANT companion must match the recording basename and lowercase extension: {sibling.name}")
-        grid = _check_companion(sibling)
-        if grid is not None:
-            trg_grid = grid
+        if candidate.suffix == ".seg":
+            later_segments = _later_segment_lengths(sibling)
+        else:
+            grid = _check_companion(sibling)
+            if grid is not None:
+                trg_grid = grid
         companions.append(sibling.name)
     # libeep is native code. Keep parser failures outside the caller's process.
     try:
@@ -181,7 +193,17 @@ def read_ant_cnt_events(path: str | Path) -> AntCntInspection:
         period, row_count = trg_grid
         if not math.isclose(period * rate, 1, rel_tol=1e-5) or row_count != len(data["events"]):
             raise RecordingEventError("The ANT .trg companion disagrees with the native sample grid or event count.")
+    events = tuple(_event(order, row, rate, count) for order, row in enumerate(data["events"]))
+    breaks = {e.sample for e in events if e.source_code.strip() == "__"
+              or (e.condition or "").casefold() in _CONNECTION_CHANGES}
+    # libeep counts backwards from the CNT sample count to locate SEG boundaries.
+    start = count
+    for length in reversed(later_segments):
+        start -= length
+        if start <= 0:
+            raise RecordingEventError("ANT segment sample counts leave no samples in the first recording segment.")
+        breaks.add(start)
     return AntCntInspection(
         container, data["reader_version"], data["amp_make"], data["amp_model"], rate, count, tuple(sorted(companions)),
-        tuple(_event(order, row, rate, count) for order, row in enumerate(data["events"])),
+        events, tuple(sorted(breaks)),
     )

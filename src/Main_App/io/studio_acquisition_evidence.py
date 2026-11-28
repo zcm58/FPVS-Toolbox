@@ -238,7 +238,8 @@ def parse_studio_acquisition_evidence(payload: Mapping[str, Any]) -> StudioAcqui
     )
 
 
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+def unique_studio_json_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous fields before the JSON decoder can discard either value."""
     result = {}
     for key, value in pairs:
         if key in result:
@@ -250,7 +251,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def load_studio_acquisition_evidence(path: str | Path) -> StudioAcquisitionEvidence:
     """Read only the explicitly selected file; do not discover or modify projects."""
     try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+        payload = json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique_studio_json_fields)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise StudioAcquisitionEvidenceError(f"Cannot read Studio acquisition evidence: {exc}") from exc
     return parse_studio_acquisition_evidence(payload)

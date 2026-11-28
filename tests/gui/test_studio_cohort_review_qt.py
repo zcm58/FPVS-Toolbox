@@ -7,6 +7,22 @@ from Main_App.gui.studio_cohort_review import StudioCohortReview
 from Main_App.projects.studio_cohort import ReviewRow, StudyReview
 
 
+def test_partial_condition_evidence_can_be_reviewed_and_deferred(qtbot, tmp_path):
+    visit = {"visit_id": "partial", "participant_number": "003", "participant_session_number": 2,
+             "setup_id": "incomplete", "runs": [{"condition_name": "Words"}, None, {"condition_name": None}]}
+    row = ReviewRow(visit, {}, (), "exception", "new", "Incomplete or unverified as-run evidence")
+    study = SimpleNamespace(project_title="Study", provenance={"setups": {"incomplete": {"toolbox": None}}})
+    dialog = StudioCohortReview(study, StudyReview((row,), {}, {}, tmp_path, None, {}))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    assert "Conditions in order: Words, unavailable, unavailable" in dialog.details[0]
+    choice = dialog.decisions["partial"]
+    choice.setCurrentIndex(choice.findText("Awaiting EEG"))
+    dialog._apply()
+    assert dialog.result() == QDialog.Accepted
+
+
 def test_archived_result_is_verified_before_desktop_dispatch(qtbot, tmp_path, monkeypatch):
     from hashlib import sha256
     from openpyxl import Workbook

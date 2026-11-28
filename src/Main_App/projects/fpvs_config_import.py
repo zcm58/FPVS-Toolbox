@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from Main_App.io.atomic_write import atomic_write, rename_with_retry, replace_with_retry
+from Main_App.io.studio_acquisition_evidence import StudioAcquisitionEvidenceError, unique_studio_json_fields
 from Main_App.projects.studio_handoff import (
     LEGACY_CONFIG_VERSIONS,
+    STUDIO_RECORDER_PLATFORMS,
     StudioRecordingSelection,
     normalize_studio_handoff,
     studio_presentation_cadence,
@@ -24,6 +26,8 @@ from Main_App.processing.removed_electrode_detection import (
     parse_electrode_list,
 )
 from Main_App.projects.project import Project
+from Main_App.projects.hardware import confirm_hardware_selection
+from Main_App.projects.grouping import GroupConfigurationError, is_windows_device_name, validate_condition_output_names
 from Main_App.projects.frequency_protocol import (
     EXPECTED_CYCLES_SOURCE_FPVS_STUDIO_IMPORT,
     ODDBALL_INPUT_MODE_DIRECT_HZ,
@@ -42,14 +46,6 @@ _FRACTIONAL_DISPLAY_REFRESH_HZ = 60.02
 # Compatibility export for callers that inspect historical support.
 SUPPORTED_CONFIG_VERSIONS = LEGACY_CONFIG_VERSIONS
 WINDOWS_FORBIDDEN_PROJECT_CHARS = set('<>:"/\\|?*')
-_WINDOWS_RESERVED_NAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-}
 
 
 class FPVSConfigImportError(ValueError):
@@ -72,6 +68,16 @@ class FPVSConfigImport:
     study_recording_platform: str | None = None
     presentation_cadence: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def declared_recording_platform(self) -> str | None:
+        """Resolve the recorder Studio named even if the cap is unknown."""
+        if self.recording_selection:
+            return self.recording_selection.platform
+        declared = self.provenance.get("recording") or {}
+        evidence = (self.provenance.get("completed_session") or {}).get("acquisition_evidence") or {}
+        captured = evidence.get("recording") or {}
+        return STUDIO_RECORDER_PLATFORMS.get(captured.get("selected_backend") or declared.get("recording_backend"))
+
 
 def read_fpvs_config(path: Path) -> FPVSConfigImport:
     """Validate a Studio handoff and resolve the supported processing subset."""
@@ -80,8 +86,10 @@ def read_fpvs_config(path: Path) -> FPVSConfigImport:
     try:
         source_bytes = config_path.read_bytes()
         payload = json.loads(
-            source_bytes.decode("utf-8-sig"), parse_constant=_reject_json_constant,
+            source_bytes.decode("utf-8-sig"), parse_constant=_reject_json_constant, object_pairs_hook=unique_studio_json_fields,
         )
+    except StudioAcquisitionEvidenceError as exc:
+        raise FPVSConfigImportError(str(exc)) from exc
     except OSError as exc:
         raise FPVSConfigImportError(f"Unable to read FPVS config: {config_path}") from exc
     except (ValueError, UnicodeError) as exc:
@@ -142,6 +150,11 @@ def _import_setup(payload: Mapping[str, Any], config_path: Path, source_bytes: b
         event_map[name] = code
         used_codes.add(code)
 
+    try:
+        validate_condition_output_names(event_map)
+    except GroupConfigurationError as exc:
+        raise FPVSConfigImportError(str(exc)) from exc
+
     manual_removed_electrodes = _manual_removed_electrodes_from_config(payload)
     oddball_marker_code = _oddball_marker_code_from_config(payload)
     frequency_protocol = _frequency_protocol_from_config(
@@ -181,12 +194,28 @@ def _import_setup(payload: Mapping[str, Any], config_path: Path, source_bytes: b
     )
 
 
-def create_project_from_fpvs_config(projects_root: Path, config_path: Path, imported: FPVSConfigImport | None = None) -> Project:
+def create_project_from_fpvs_config(
+    projects_root: Path, config_path: Path, imported: FPVSConfigImport | None = None, *,
+    confirmed_platform: str | None = None, input_folder: Path | None = None,
+) -> Project:
     """Create and save a Toolbox project from the importable Studio config subset."""
 
-    imported = imported or read_fpvs_config(config_path)
+    if imported is None:
+        imported = read_fpvs_config(config_path)
+    else:
+        with Path(config_path).open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != imported.source_sha256 or Path(config_path).name != imported.source_filename:
+            raise FPVSConfigImportError("The selected Studio export changed. Reopen it before importing.")
     if imported.provenance.get("format") == "fpvs-study-handoff":
         raise FPVSConfigImportError("Review the study roster and select its recordings before creating a project.")
+    declared_platform = imported.declared_recording_platform
+    if confirmed_platform is not None and declared_platform is not None and declared_platform != confirmed_platform:
+        from Main_App.projects.hardware import HARDWARE_LABELS
+        raise FPVSConfigImportError(
+            f"Studio recorded this setup for {HARDWARE_LABELS[declared_platform]}. "
+            "Choose its recording system or select the matching Studio export."
+        )
     projects_root = Path(projects_root).resolve()
     projects_root.mkdir(parents=True, exist_ok=True)
     project_root = _unique_project_root(projects_root, imported.project_title)
@@ -195,12 +224,15 @@ def create_project_from_fpvs_config(projects_root: Path, config_path: Path, impo
     with tempfile.TemporaryDirectory(prefix=".studio-import-", dir=projects_root) as staging:
         staged_root = Path(staging) / "project"
         staged_root.mkdir()
-        _create_imported_project(staged_root, imported)
+        _create_imported_project(staged_root, imported, confirmed_platform=confirmed_platform, input_folder=input_folder)
         rename_with_retry(staged_root, project_root)
     return Project.load(project_root)
 
 
-def _create_imported_project(project_root: Path, imported: FPVSConfigImport) -> None:
+def _create_imported_project(
+    project_root: Path, imported: FPVSConfigImport, *, confirmed_platform: str | None = None,
+    input_folder: Path | None = None,
+) -> None:
     settings = new_project_preprocessing_settings()
     if imported.recording_selection:
         settings = imported.recording_selection.apply(settings)
@@ -229,6 +261,12 @@ def _create_imported_project(project_root: Path, imported: FPVSConfigImport) -> 
                 "manual_removed_electrodes": imported.manual_removed_electrodes,
             }
         )
+    if confirmed_platform is not None and imported.recording_selection is None:
+        project.update_preprocessing(confirm_hardware_selection(
+            project.preprocessing, confirmed_platform, confirmed_change=True,
+        ))
+    if input_folder is not None:
+        project.input_folder = input_folder
     _write_import_provenance(project, imported)
     project.save(updated_tool_namespaces=("studio_import",))
 
@@ -570,25 +608,26 @@ def _required_int(value: Any, location: str) -> int:
 
 def _project_dir_name(project_title: str) -> str:
     cleaned = "".join(
-        "_" if char in WINDOWS_FORBIDDEN_PROJECT_CHARS else char for char in project_title.strip()
+        "_" if char in WINDOWS_FORBIDDEN_PROJECT_CHARS or ord(char) < 32 else char for char in project_title.strip()
     )
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     if not cleaned:
         cleaned = "Imported FPVS Project"
-    if cleaned.upper() in _WINDOWS_RESERVED_NAMES:
-        cleaned = f"{cleaned}_Project"
+    if is_windows_device_name(cleaned):
+        stem, dot, extension = cleaned.partition(".")
+        cleaned = f"{stem}_Project{dot}{extension}"
     return cleaned
 
 
 def _unique_project_root(projects_root: Path, project_title: str) -> Path:
     base_name = _project_dir_name(project_title)
-    candidate = projects_root / base_name
-    if not candidate.exists():
-        return candidate
-
-    suffix = 2
+    index = 1
     while True:
-        candidate = projects_root / f"{base_name} {suffix}"
-        if not candidate.exists():
+        suffix = "" if index == 1 else f" {index}"
+        # A filesystem component can hold 255 bytes on Linux or 255 UTF-16
+        # units on Windows. Cutting by UTF-8 bytes satisfies both limits.
+        stem = base_name.encode("utf-8")[:255 - len(suffix)].decode("utf-8", errors="ignore").rstrip(" .")
+        candidate = projects_root / f"{stem}{suffix}"
+        if not candidate.exists() and not candidate.is_symlink():
             return candidate
-        suffix += 1
+        index += 1

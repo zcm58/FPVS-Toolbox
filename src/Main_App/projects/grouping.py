@@ -407,12 +407,15 @@ def validate_group_folder_name(value: object) -> str:
             f"Group folder name contains invalid Windows character(s): {joined}"
         )
 
-    device_stem = folder_name.split(".", maxsplit=1)[0].upper()
-    if device_stem in _RESERVED_WINDOWS_DEVICE_NAMES:
+    if is_windows_device_name(folder_name):
         raise GroupConfigurationError(
-            f"Group folder name uses reserved Windows device name: {device_stem}"
+            f"Group folder name uses reserved Windows device name: {folder_name}"
         )
     return folder_name
+
+
+def is_windows_device_name(name: str) -> bool:
+    return name.partition(".")[0].rstrip(" ").upper() in _RESERVED_WINDOWS_DEVICE_NAMES
 
 
 def condition_output_folder_name(label: str) -> str:
