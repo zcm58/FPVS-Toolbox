@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import to_hex
+from matplotlib.colors import to_hex, to_rgb
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -23,7 +23,7 @@ from Main_App.projects.project import Project
 from Main_App.projects.frequency_protocol import FrequencyProtocol
 from Tools.Publication_Maps import metrics as publication_map_metrics
 from Tools.Stats.analysis import dv_policy_group_significant as group_policy
-from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS
+from Tools.Publication_Maps.colormaps import SCALP_COLORMAP_STOPS, scalp_color_endpoints
 from Tools.Publication_Maps.excel_inputs import discover_conditions
 from Tools.Publication_Maps.generation_outcome import PublicationMapsOutcomeStatus
 from Tools.Publication_Maps.metrics import build_publication_map_result
@@ -651,6 +651,24 @@ def test_z_score_colormap_uses_white_below_threshold() -> None:
     assert to_hex(z_cmap(-0.1)).lower() == "#ffffff"
     assert to_hex(z_cmap(0.0)).lower() == "#2166ac"
     assert to_hex(z_cmap(1.0)).lower() == "#b2182b"
+
+
+@pytest.mark.parametrize("metric", list(PublicationMetric))
+def test_surface_colormap_interprets_the_same_range_using_the_publication_legend(metric):
+    cmap = colormap_for_metric(metric, ColorBounds(), scalp_view="3d")
+    low, high = scalp_color_endpoints("3d")
+    assert (to_hex(cmap(0.0)), to_hex(cmap(1.0))) == (low, high) == ("#222a86", "#700809")
+    for position, reference in ((0.30, "#36c4f8"), (0.5, "#a3d762"), (0.625, "#fcf805"), (0.89, "#f2151a")):
+        np.testing.assert_allclose(cmap(position)[:3], to_rgb(reference), atol=2 / 255)
+    assert to_hex(cmap(-0.01)) == ("#ffffff" if metric is PublicationMetric.Z_SCORE else low)
+
+
+def test_explicit_endpoint_matching_the_flat_default_is_honored_in_3d():
+    low, _ = scalp_color_endpoints("2d")
+    bounds = ColorBounds(low_color=low, high_color="#ab0047")
+    cmap = colormap_for_metric(PublicationMetric.BCA, bounds, scalp_view="3d")
+    assert (to_hex(cmap(0.0)), to_hex(cmap(1.0))) == (low, "#ab0047")
+    assert (low, "#ab0047") == scalp_color_endpoints("3d", bounds.low_color, bounds.high_color)
 
 
 def test_bca_metric_limits_auto_or_fixed() -> None:

@@ -7,6 +7,7 @@ import threading
 from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import replace
+from functools import cache, partial
 
 from PySide6.QtCore import QObject, Signal, Slot
 
@@ -124,6 +125,14 @@ class PublicationMapsWorker(QObject):
         viewer_panels = ()
         try:
             self._cancellation_checkpoint()
+            build_result = build_publication_map_result
+            if self.request.display_montage is not None:
+                from Tools.Publication_Maps.display_montage import load_display_montage
+
+                # Freeze one explicitly selected file for the batch, reading
+                # it only if a released source actually lacks head positions.
+                load_fallback = cache(partial(load_display_montage, self.request.display_montage))
+                build_result = partial(build_result, load_fallback=load_fallback)
             if self._group_comparison_enabled:
                 validate_group_comparison_project_groups(self.requests)
                 self._cancellation_checkpoint()
@@ -138,7 +147,7 @@ class PublicationMapsWorker(QObject):
                     group_label = request.group_label or "Ungrouped dataset"
                     self._emit_phase_progress(index, 5)
                     self.message.emit(f"[{group_label}] Reading indexed workbooks...")
-                    result = build_publication_map_result(
+                    result = build_result(
                         request,
                         cancel_check=self._cancellation_checkpoint,
                     )

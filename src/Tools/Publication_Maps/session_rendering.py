@@ -548,7 +548,7 @@ def _render_session_panel_set(
     axes = np.asarray(axes, dtype=object)
     metric = panel_set.metric
     bounds = request.color_bounds.get(metric, ColorBounds())
-    cmap = colormap_for_metric(metric, bounds)
+    cmap = colormap_for_metric(metric, bounds, scalp_view=request.scalp_view)
     main_vlim = _main_vlim(panel_set, bounds)
     main_images = []
     try:
@@ -560,12 +560,14 @@ def _render_session_panel_set(
                 ax = axes[row, column]
                 image, missing = _draw_topomap(
                     _panel_frame(panel),
+                    geometry=panel_set.geometry,
                     ax=ax,
                     metric=metric,
                     cmap=cmap,
                     bounds=bounds,
                     vlim_override=main_vlim,
                     scalp_view=request.scalp_view,
+                    compact=True,
                 )
                 _center_topomap_vertical_view(ax)
                 main_images.append(image)
@@ -591,12 +593,14 @@ def _render_session_panel_set(
                 ax = axes[2, column]
                 image, missing = _draw_topomap(
                     _difference_frame(difference),
+                    geometry=panel_set.geometry,
                     ax=ax,
                     metric=metric,
                     cmap=plt.get_cmap("RdBu_r"),
                     bounds=ColorBounds(),
                     vlim_override=(-difference_limit, difference_limit),
                     scalp_view=request.scalp_view,
+                    compact=True,
                 )
                 _center_topomap_vertical_view(ax)
                 difference_images.append(image)

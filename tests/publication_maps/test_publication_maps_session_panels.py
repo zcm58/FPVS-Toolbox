@@ -162,6 +162,31 @@ def test_session_identity_is_required_and_never_parsed_from_workbook_path(
         )
 
 
+def test_auxiliary_channels_cannot_set_scales_or_inflate_displayed_sample_counts(tmp_path: Path) -> None:
+    records = _cohort(tmp_path)
+    long_values = _long_values(
+        records,
+        {
+            record.recording_id: {
+                "Cz": np.nan if record.participant_id == "P02" else float(record.visit_index),
+                "AUX": 1000.0 * record.visit_index,
+            }
+            for record in records
+        },
+    )
+    long_values.loc[long_values["electrode"].eq("AUX"), "is_montage_electrode"] = False
+
+    result = build_repeated_session_map_panels(
+        long_values=long_values, workbook_records=records, condition="Faces",
+        metric=PublicationMetric.BCA, selected_harmonics_hz=(1.2, 2.4),
+    )
+
+    assert (result.common_vmin, result.common_vmax) == pytest.approx((1.0, 2.0))
+    assert (result.difference_vmin, result.difference_vmax) == pytest.approx((-1.0, 1.0))
+    assert result.panel("control", "luteal").participant_ids == ("P01",)
+    assert result.paired_difference("control").participant_ids == ("P01",)
+
+
 def test_long_values_must_join_an_exact_canonical_workbook_path(tmp_path: Path) -> None:
     records = _cohort(tmp_path)
     long_values = _long_values(

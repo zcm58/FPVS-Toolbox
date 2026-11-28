@@ -12,7 +12,7 @@ from Main_App.processing.hardware_capabilities import spatial_tool_unavailable_r
 BP = {"preprocessing": {"hardware_platform": "brain_products", "hardware_confirmed": True}}
 
 
-@pytest.mark.parametrize("tool", ["LORETA Visualizer", "Scalp Maps", "Free Harmonic Clustering Analysis"])
+@pytest.mark.parametrize("tool", ["LORETA Visualizer", "Free Harmonic Clustering Analysis"])
 def test_fixed_spatial_methods_require_qualified_hardware(tool):
     assert "BioSemi64" in spatial_tool_unavailable_reason(BP, tool)
     assert "Brain Products" in spatial_tool_unavailable_reason(SimpleNamespace(preprocessing=BP["preprocessing"]), tool)
@@ -25,7 +25,7 @@ def test_fixed_spatial_methods_require_qualified_hardware(tool):
      "initial_reference": "channels", "initial_reference_channels": []},
 ])
 def test_spatial_tool_explanation_does_not_require_complete_processing_setup(settings):
-    assert "Brain Products" in spatial_tool_unavailable_reason(settings, "Scalp Maps")
+    assert "Brain Products" in spatial_tool_unavailable_reason(settings, "LORETA Visualizer")
 
 
 @pytest.mark.parametrize("tool", ["Standard FPVS Screening", "SNR", "Individual Detectability", "Stats"])
@@ -33,13 +33,13 @@ def test_nonspatial_tools_remain_available(tool):
     assert spatial_tool_unavailable_reason(BP, tool) == ""
 
 
-def test_scalp_map_public_loader_rejects_brain_products_before_any_channels(tmp_path, monkeypatch):
-    from Main_App.projects import DatasetIndexError
+def test_scalp_map_admits_index_for_source_geometry_validation(tmp_path, monkeypatch):
     from Tools.Publication_Maps import excel_inputs
 
-    monkeypatch.setattr(excel_inputs, "load_project_dataset_index", lambda _: SimpleNamespace(manifest=BP))
-    with pytest.raises(DatasetIndexError, match="Brain Products"):
-        excel_inputs.load_publication_dataset_index(tmp_path)
+    index = SimpleNamespace(manifest=BP)
+    monkeypatch.setattr(excel_inputs, "load_project_dataset_index", lambda _: index)
+    assert spatial_tool_unavailable_reason(BP, "Scalp Maps") == ""
+    assert excel_inputs.load_publication_dataset_index(tmp_path) is index
 
 
 @pytest.mark.parametrize("selector", ["_select_cohort", "_select_repeated_batch_cohort"])

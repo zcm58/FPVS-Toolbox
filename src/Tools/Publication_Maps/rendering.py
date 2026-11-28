@@ -31,9 +31,10 @@ from Tools.Publication_Maps.models import (
     PublicationMapRequest,
     PublicationMapResult,
     PublicationMetric,
+    ScalpMapGeometry,
 )
 from Tools.Publication_Maps.output_contract import PublicationArtifactTransaction
-from Tools.Publication_Maps.scalp_io import align_render_values
+from Tools.Publication_Maps.scalp_io import align_render_values, require_compatible_geometry
 
 apply_matplotlib_figure_style()
 
@@ -292,7 +293,7 @@ def _group_comparison_identity(
 def _validate_group_comparison_results(
     results: Sequence[PublicationMapResult],
     requests: Sequence[PublicationMapRequest],
-) -> None:
+) -> ScalpMapGeometry | None:
     normalized_results = tuple(results)
     normalized_requests = tuple(requests)
     validate_group_comparison_requests(normalized_requests)
@@ -370,6 +371,8 @@ def _validate_group_comparison_results(
                     "Scalp Maps comparison data contain a mismatched or pooled "
                     f"group identity for {request_id}: {sorted(frame_ids)!r}."
                 )
+
+    return require_compatible_geometry(result.geometry for result in normalized_results)
 
 
 def _group_comparison_stem(
@@ -476,7 +479,7 @@ def render_group_comparison_figures(
 
     normalized_results = tuple(results)
     normalized_requests = tuple(requests)
-    _validate_group_comparison_results(
+    geometry = _validate_group_comparison_results(
         normalized_results,
         normalized_requests,
     )
@@ -496,7 +499,6 @@ def render_group_comparison_figures(
         metrics = _request_metrics(first_request)
         first_grand = first_result.grand_average_values
         second_grand = second_result.grand_average_values
-        base_output = Path(first_request.output_root).expanduser().resolve(strict=False)
         rendered: list[Path] = []
 
         if PublicationMetric.BCA in metrics and PublicationMetric.SNR in metrics:
@@ -528,29 +530,24 @@ def render_group_comparison_figures(
                 metric_stem=metric_stem,
                 scalp_view=first_request.scalp_view,
             )
-            for suffix, enabled in (
-                (".png", first_request.export_png),
-                (".pdf", first_request.export_pdf),
-            ):
-                if not enabled:
-                    continue
-                _checkpoint(cancel_check)
-                final_path = base_output / f"{stem}{suffix}"
-                staged_path = active_transaction.stage_path(final_path)
-                _render_combined_paired_topomap(
-                    values_by_metric,
-                    metrics=ordered_metrics,
-                    first_title=first_title,
-                    second_title=second_title,
-                    output_path=staged_path,
-                    bounds_by_metric=first_request.color_bounds,
-                    dpi=first_request.png_dpi,
-                    cancel_check=cancel_check,
-                    figure_title=condition,
-                    layout_style=MULTI_GROUP_LAYOUT_STYLE,
-                    scalp_view=first_request.scalp_view,
-                )
-                rendered.append(final_path)
+            paths = _requested_figure_paths(first_request, stem)
+            _checkpoint(cancel_check)
+            staged_paths = tuple(active_transaction.stage_path(path) for path in paths)
+            _render_combined_paired_topomap(
+                values_by_metric,
+                geometry=geometry,
+                metrics=ordered_metrics,
+                first_title=first_title,
+                second_title=second_title,
+                output_path=staged_paths,
+                bounds_by_metric=first_request.color_bounds,
+                dpi=first_request.png_dpi,
+                cancel_check=cancel_check,
+                figure_title=condition,
+                layout_style=MULTI_GROUP_LAYOUT_STYLE,
+                scalp_view=first_request.scalp_view,
+            )
+            rendered.extend(paths)
         else:
             for metric in metrics:
                 first_values = _comparison_metric_group(
@@ -573,30 +570,25 @@ def render_group_comparison_figures(
                     scalp_view=first_request.scalp_view,
                 )
                 bounds = first_request.color_bounds.get(metric, ColorBounds())
-                for suffix, enabled in (
-                    (".png", first_request.export_png),
-                    (".pdf", first_request.export_pdf),
-                ):
-                    if not enabled:
-                        continue
-                    _checkpoint(cancel_check)
-                    final_path = base_output / f"{stem}{suffix}"
-                    staged_path = active_transaction.stage_path(final_path)
-                    _render_paired_topomap(
-                        first_values,
-                        second_values,
-                        metric=metric,
-                        first_title=first_title,
-                        second_title=second_title,
-                        output_path=staged_path,
-                        bounds=bounds,
-                        dpi=first_request.png_dpi,
-                        cancel_check=cancel_check,
-                        figure_title=condition,
-                        layout_style=MULTI_GROUP_LAYOUT_STYLE,
-                        scalp_view=first_request.scalp_view,
-                    )
-                    rendered.append(final_path)
+                paths = _requested_figure_paths(first_request, stem)
+                _checkpoint(cancel_check)
+                staged_paths = tuple(active_transaction.stage_path(path) for path in paths)
+                _render_paired_topomap(
+                    first_values,
+                    second_values,
+                    geometry=geometry,
+                    metric=metric,
+                    first_title=first_title,
+                    second_title=second_title,
+                    output_path=staged_paths,
+                    bounds=bounds,
+                    dpi=first_request.png_dpi,
+                    cancel_check=cancel_check,
+                    figure_title=condition,
+                    layout_style=MULTI_GROUP_LAYOUT_STYLE,
+                    scalp_view=first_request.scalp_view,
+                )
+                rendered.extend(paths)
         _checkpoint(cancel_check)
         if not rendered:
             raise PublicationMapInputError(
@@ -640,6 +632,12 @@ def _comparison_metric_group(
     return selected
 
 
+def _requested_figure_paths(request: PublicationMapRequest, stem: str) -> tuple[Path, ...]:
+    directory = Path(request.output_root).expanduser().resolve(strict=False)
+    formats = ((".png", request.export_png), (".pdf", request.export_pdf))
+    return tuple(directory / f"{stem}{suffix}" for suffix, enabled in formats if enabled)
+
+
 def _render_publication_figures_staged(
     result: PublicationMapResult,
     request: PublicationMapRequest,
@@ -674,7 +672,7 @@ def _render_publication_figures_staged(
                 Diagnostic(
                     level="error",
                     condition=str(condition),
-                    message="No BioSemi64 montage electrodes available for rendering.",
+                    message="No montage electrodes available for rendering.",
                     detail=f"{metric.display_name} {map_label}",
                 )
             )
@@ -682,34 +680,21 @@ def _render_publication_figures_staged(
         title = str(condition)
         stem = figure_stem(f"{condition}_{metric.value}_{map_label}", request.scalp_view)
         bounds = request.color_bounds.get(metric, ColorBounds())
-        if request.export_png:
+        paths = _requested_figure_paths(request, stem)
+        if paths:
             _checkpoint(cancel_check)
-            png_path = request.output_root / f"{stem}.png"
             render_topomap(
                 montage_group,
+                geometry=result.geometry,
                 metric=metric,
                 title=title,
-                output_path=png_path,
+                output_path=paths,
                 bounds=bounds,
                 scalp_view=request.scalp_view,
                 dpi=request.png_dpi,
                 cancel_check=cancel_check,
             )
-            rendered.append(png_path)
-        if request.export_pdf:
-            _checkpoint(cancel_check)
-            pdf_path = request.output_root / f"{stem}.pdf"
-            render_topomap(
-                montage_group,
-                metric=metric,
-                title=title,
-                output_path=pdf_path,
-                bounds=bounds,
-                scalp_view=request.scalp_view,
-                dpi=request.png_dpi,
-                cancel_check=cancel_check,
-            )
-            rendered.append(pdf_path)
+            rendered.extend(paths)
     return rendered
 
 
@@ -767,7 +752,8 @@ def render_topomap(
     *,
     metric: PublicationMetric,
     title: str,
-    output_path: Path,
+    output_path: Path | tuple[Path, ...],
+    geometry: ScalpMapGeometry | None = None,
     bounds: ColorBounds = ColorBounds(),
     scalp_view: str = "2d",
     dpi: int = 300,
@@ -775,21 +761,27 @@ def render_topomap(
 ) -> None:
     """Render a condition's scalp values with their requested projection."""
 
-    layout = _surface_layout(SINGLE_GROUP_LAYOUT_STYLE) if scalp_view == "3d" else SINGLE_GROUP_LAYOUT_STYLE
+    figsize = SINGLE_GROUP_LAYOUT_STYLE.single_map_figsize
+    if scalp_view == "3d":
+        figsize = _surface_layout(SINGLE_GROUP_LAYOUT_STYLE).single_map_figsize
+    elif scalp_view == "3d_2d":
+        figsize = (JOURNAL_TEXT_WIDTH_IN, 3.8)
     fig, ax = plt.subplots(
-        figsize=layout.single_map_figsize,
+        figsize=figsize,
         dpi=dpi,
     )
     try:
         _checkpoint(cancel_check)
-        cmap = colormap_for_metric(metric, bounds)
+        cmap = colormap_for_metric(metric, bounds, scalp_view=scalp_view)
         im, missing_count = _draw_topomap(
             values,
+            geometry=geometry,
             ax=ax,
             metric=metric,
             cmap=cmap,
             bounds=bounds,
             scalp_view=scalp_view,
+            compact=scalp_view == "3d_2d",
         )
         cbar = fig.colorbar(
             im,
@@ -816,16 +808,18 @@ def render_topomap(
         plt.close(fig)
 
 
-def colormap_for_metric(metric: PublicationMetric, bounds: ColorBounds | None = None):
+def colormap_for_metric(metric: PublicationMetric, bounds: ColorBounds | None = None, *, scalp_view: str = "2d"):
     """Return the publication colormap for a metric."""
 
-    if bounds is None:
+    if bounds is None and scalp_view == "2d":
         cmap = BCA_CMAP
     else:
+        colors = bounds or ColorBounds()
         cmap = scalp_colormap(
-            name="FpvsDetailedScalpSequentialCustom",
-            low_color=bounds.low_color,
-            high_color=bounds.high_color,
+            name="FpvsDetailedScalpSequentialCustom" if scalp_view == "2d" else "FpvsPublicationScalp3D",
+            low_color=colors.low_color,
+            high_color=colors.high_color,
+            scalp_view=scalp_view,
         )
     if metric is PublicationMetric.Z_SCORE:
         cmap = cmap.copy()
@@ -873,40 +867,24 @@ def _render_paired_condition_figures(
                 )
                 continue
             stem = figure_stem(f"{first}_and_{second}_{metric.value}_paired", request.scalp_view)
-            if request.export_png:
+            paths = _requested_figure_paths(request, stem)
+            if paths:
                 _checkpoint(cancel_check)
-                png_path = request.output_root / f"{stem}.png"
                 _render_paired_topomap(
                     first_group,
                     second_group,
+                    geometry=result.geometry,
                     metric=metric,
                     first_title=str(first),
                     second_title=str(second),
-                    output_path=png_path,
+                    output_path=paths,
                     bounds=bounds,
                     dpi=request.png_dpi,
                     cancel_check=cancel_check,
                     layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
                     scalp_view=request.scalp_view,
                 )
-                rendered.append(png_path)
-            if request.export_pdf:
-                _checkpoint(cancel_check)
-                pdf_path = request.output_root / f"{stem}.pdf"
-                _render_paired_topomap(
-                    first_group,
-                    second_group,
-                    metric=metric,
-                    first_title=str(first),
-                    second_title=str(second),
-                    output_path=pdf_path,
-                    bounds=bounds,
-                    dpi=request.png_dpi,
-                    cancel_check=cancel_check,
-                    layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
-                    scalp_view=request.scalp_view,
-                )
-                rendered.append(pdf_path)
+                rendered.extend(paths)
     return rendered
 
 
@@ -944,38 +922,23 @@ def _render_combined_paired_condition_figures(
 
         metric_stem = "_".join(metric.value for metric in metrics)
         stem = figure_stem(f"{first}_and_{second}_{metric_stem}_paired", request.scalp_view)
-        if request.export_png:
+        paths = _requested_figure_paths(request, stem)
+        if paths:
             _checkpoint(cancel_check)
-            png_path = request.output_root / f"{stem}.png"
             _render_combined_paired_topomap(
                 groups,
+                geometry=result.geometry,
                 metrics=metrics,
                 first_title=str(first),
                 second_title=str(second),
-                output_path=png_path,
+                output_path=paths,
                 bounds_by_metric=request.color_bounds,
                 dpi=request.png_dpi,
                 cancel_check=cancel_check,
                 layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
                 scalp_view=request.scalp_view,
             )
-            rendered.append(png_path)
-        if request.export_pdf:
-            _checkpoint(cancel_check)
-            pdf_path = request.output_root / f"{stem}.pdf"
-            _render_combined_paired_topomap(
-                groups,
-                metrics=metrics,
-                first_title=str(first),
-                second_title=str(second),
-                output_path=pdf_path,
-                bounds_by_metric=request.color_bounds,
-                dpi=request.png_dpi,
-                cancel_check=cancel_check,
-                layout_style=PAIRED_CONDITION_LAYOUT_STYLE,
-                scalp_view=request.scalp_view,
-            )
-            rendered.append(pdf_path)
+            rendered.extend(paths)
     return rendered
 
 
@@ -1016,7 +979,8 @@ def _render_paired_topomap(
     metric: PublicationMetric,
     first_title: str,
     second_title: str,
-    output_path: Path,
+    output_path: Path | tuple[Path, ...],
+    geometry: ScalpMapGeometry | None = None,
     bounds: ColorBounds,
     dpi: int,
     cancel_check: Callable[[], None] | None,
@@ -1027,6 +991,8 @@ def _render_paired_topomap(
     _checkpoint(cancel_check)
     if scalp_view == "3d":
         layout_style = _surface_layout(layout_style)
+    elif scalp_view == "3d_2d":
+        layout_style = replace(layout_style, paired_map_figsize=(JOURNAL_TEXT_WIDTH_IN, 5.0))
     fig, axes = plt.subplots(
         1,
         2,
@@ -1034,15 +1000,17 @@ def _render_paired_topomap(
         dpi=dpi,
     )
     try:
-        cmap = colormap_for_metric(metric, bounds)
+        cmap = colormap_for_metric(metric, bounds, scalp_view=scalp_view)
         shared_vlim = _paired_vlim(
             first_values,
             second_values,
+            geometry=geometry,
             metric=metric,
             bounds=bounds,
         )
         im, first_missing = _draw_topomap(
             first_values,
+            geometry=geometry,
             ax=axes[0],
             metric=metric,
             cmap=cmap,
@@ -1052,6 +1020,7 @@ def _render_paired_topomap(
         )
         _, second_missing = _draw_topomap(
             second_values,
+            geometry=geometry,
             ax=axes[1],
             metric=metric,
             cmap=cmap,
@@ -1091,7 +1060,8 @@ def _render_combined_paired_topomap(
     metrics: tuple[PublicationMetric, ...],
     first_title: str,
     second_title: str,
-    output_path: Path,
+    output_path: Path | tuple[Path, ...],
+    geometry: ScalpMapGeometry | None = None,
     bounds_by_metric: dict[PublicationMetric, ColorBounds],
     dpi: int,
     cancel_check: Callable[[], None] | None,
@@ -1100,7 +1070,7 @@ def _render_combined_paired_topomap(
     scalp_view: str = "2d",
 ) -> None:
     _checkpoint(cancel_check)
-    if scalp_view == "3d":
+    if scalp_view in ("3d", "3d_2d"):
         layout_style = _surface_layout(layout_style)
     fig = plt.figure(
         figsize=_combined_paired_figsize(
@@ -1131,30 +1101,35 @@ def _render_combined_paired_topomap(
             ]
             cax = fig.add_axes(row_layout["colorbar"])
             bounds = bounds_by_metric.get(metric, ColorBounds())
-            cmap = colormap_for_metric(metric, bounds)
+            cmap = colormap_for_metric(metric, bounds, scalp_view=scalp_view)
             shared_vlim = _paired_vlim(
                 first_values,
                 second_values,
+                geometry=geometry,
                 metric=metric,
                 bounds=bounds,
             )
             im, first_missing = _draw_topomap(
                 first_values,
+                geometry=geometry,
                 ax=row_axes[0],
                 metric=metric,
                 cmap=cmap,
                 bounds=bounds,
                 vlim_override=shared_vlim,
                 scalp_view=scalp_view,
+                compact=True,
             )
             _, second_missing = _draw_topomap(
                 second_values,
+                geometry=geometry,
                 ax=row_axes[1],
                 metric=metric,
                 cmap=cmap,
                 bounds=bounds,
                 vlim_override=shared_vlim,
                 scalp_view=scalp_view,
+                compact=True,
             )
             if row_idx == 0:
                 row_axes[0].set_title(
@@ -1265,24 +1240,47 @@ def _draw_topomap(
     ax: plt.Axes,
     metric: PublicationMetric,
     cmap,
+    geometry: ScalpMapGeometry | None = None,
     bounds: ColorBounds,
     vlim_override: tuple[float, float] | None = None,
     scalp_view: str = "2d",
+    compact: bool = False,
 ):
-    data, info, missing_count, diagnostics = align_render_values(values)
+    data, info, missing_count, diagnostics = align_render_values(values, geometry=geometry)
     _ = diagnostics
     vlim = vlim_override or _metric_limits(data, metric=metric, bounds=bounds)
-    if scalp_view == "3d":
-        from Tools.Publication_Maps.scalp_surface import draw_scalp_surface
+    if scalp_view in ("3d", "3d_2d"):
+        from Tools.Publication_Maps.scalp_surface import draw_scalp_surface, prepare_scalp_surface_pair
 
         norm = matplotlib.colors.Normalize(*vlim)
         ax.set_axis_off()
-        ax.set_box_aspect(SURFACE_PAIR_ASPECT)
-        for left, view in ((0.0, "front"), (0.51, "back")):
-            view_ax = ax.inset_axes((left, 0.11, 0.49, 0.88))
-            draw_scalp_surface(view_ax, data, info, view=view, cmap=cmap, norm=norm)
+        if scalp_view == "3d":
+            views = (("front", "Front"), ("back", "Back"))
+        else:
+            views = (("back", "3D back · Sibson"), ("top", "2D top · Cubic"))
+        if scalp_view == "3d_2d" and not compact:
+            ax.set_box_aspect(1.75)
+            boxes = ((0.00, 0.57, 1.00, 0.43), (0.00, 0.055, 1.00, 0.42))
+        else:
+            ax.set_box_aspect(0.64 if scalp_view == "3d_2d" else SURFACE_PAIR_ASPECT)
+            boxes = ((0.00, 0.11, 0.49, 0.88), (0.51, 0.11, 0.49, 0.88))
+        axes = [ax.inset_axes(box) for box in boxes]
+        if scalp_view == "3d":
+            prepare_scalp_surface_pair(info, *axes)
+        for (view, label), box, view_ax in zip(views, boxes, axes, strict=True):
+            if view == "top":
+                _plot_topomap_compat(data=data, info=info, ax=view_ax, cmap=cmap, vlim=vlim)
+            else:
+                draw_scalp_surface(view_ax, data, info, view=view, cmap=cmap, norm=norm)
+            transform = view_ax.transAxes
+            position = (0.5, -0.01)
+            if scalp_view == "3d_2d":
+                # The two aspect ratios differ. Align captions to the layout
+                # slots so the circle's outline cannot collide with its label.
+                transform = ax.transAxes
+                position = (box[0] + box[2] / 2, box[1] - 0.012)
             view_ax.text(
-                0.5, -0.01, view.title(), transform=view_ax.transAxes,
+                *position, label, transform=transform,
                 ha="center", va="top", **figure_text_kwargs("small"),
             )
         return matplotlib.cm.ScalarMappable(norm, cmap), missing_count
@@ -1303,10 +1301,11 @@ def _paired_vlim(
     second_values: pd.DataFrame,
     *,
     metric: PublicationMetric,
+    geometry: ScalpMapGeometry | None = None,
     bounds: ColorBounds,
 ) -> tuple[float, float]:
-    first_data, _first_info, _first_missing, _first_diag = align_render_values(first_values)
-    second_data, _second_info, _second_missing, _second_diag = align_render_values(second_values)
+    first_data, _first_info, _first_missing, _first_diag = align_render_values(first_values, geometry=geometry)
+    second_data, _second_info, _second_missing, _second_diag = align_render_values(second_values, geometry=geometry)
     data = np.concatenate([first_data, second_data])
     return _metric_limits(data, metric=metric, bounds=bounds)
 
@@ -1370,22 +1369,24 @@ def _colorbar_text_kwargs() -> dict[str, object]:
 
 def _save_figure(
     fig: plt.Figure,
-    output_path: Path,
+    output_path: Path | tuple[Path, ...],
     *,
     dpi: int,
     cancel_check: Callable[[], None] | None = None,
 ) -> None:
     """Save figure with transparent backgrounds for PDF composition workflows."""
 
-    _checkpoint(cancel_check)
-    transparent = output_path.suffix.lower() == ".pdf"
-    if transparent:
-        fig.patch.set_alpha(0)
-        for ax in fig.axes:
-            ax.set_facecolor("none")
-            ax.patch.set_alpha(0)
-    fig.savefig(output_path, dpi=dpi, transparent=transparent)
-    _checkpoint(cancel_check)
+    paths = (output_path,) if isinstance(output_path, Path) else output_path
+    for path in paths:
+        _checkpoint(cancel_check)
+        transparent = path.suffix.lower() == ".pdf"
+        if transparent:
+            fig.patch.set_alpha(0)
+            for ax in fig.axes:
+                ax.set_facecolor("none")
+                ax.patch.set_alpha(0)
+        fig.savefig(path, dpi=dpi, transparent=transparent)
+        _checkpoint(cancel_check)
 
 
 def sanitize_filename_stem(value: str) -> str:
@@ -1398,8 +1399,8 @@ def sanitize_filename_stem(value: str) -> str:
 def figure_stem(raw_stem: str, scalp_view: str) -> str:
     """Keep paired surface exports distinct from the established flat outputs."""
     stem = sanitize_filename_stem(raw_stem)
-    if scalp_view == "3d":
-        return f"{stem}_3d"
+    if scalp_view in ("3d", "3d_2d"):
+        return f"{stem}_{scalp_view}"
     if scalp_view == "2d":
         return stem
     raise ValueError(f"Unknown scalp-map view: {scalp_view!r}.")

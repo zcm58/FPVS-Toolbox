@@ -18,12 +18,24 @@ Open a managed project, choose one canonical group (or All groups for separate
 group outputs), then select conditions and map types on the Generate Maps tab.
 Choose <strong>View in 3D</strong> to rotate and zoom the selected maps.
 Choose <strong>3D front and back</strong> under Export view to show the same
-BioSemi64 electrode values on a template scalp. Both views use one color scale.
-The color between electrodes is interpolated. Estimating activity inside the
-brain requires a separate source analysis.
-That tab keeps map appearance and ranges, generation status, progress, the
-tool information action, and <strong>Generate Scalp Maps</strong> together.
-BCA uses automatic limits until you explicitly enable its fixed range.
+electrode values on a generic head, or <strong>3D back + 2D top</strong> to
+compare the two projections with one color scale. Dots mark contributing electrodes.
+In 3D, Sibson natural-neighbor interpolation blends values according to the spacing
+of nearby electrodes. Gray skin lies outside electrode coverage. Every 2D
+top view uses cubic interpolation, which can draw peaks beyond the outermost
+electrodes. The combined figure labels both methods.
+</p>
+<p>
+Scalp Maps uses the recording's electrode positions. If they are missing,
+choose the acquisition cap under <strong>Advanced Settings → Fallback montage</strong>.
+You can also load a digitization FIF, CapTrak BVCT, or a CSV/TSV with
+<code>electrode,x_m,y_m,z_m</code> columns (use <code>_mm</code> for millimetres).
+Tables use the MNE head coordinate frame. The origin lies on the line joining
+the ear landmarks, with positive X toward the right ear, Y toward the nasion,
+and Z up. Labels must match the released scalp channels.
+</p>
+<p>
+BCA uses automatic limits until you enable a fixed range on Generate Maps.
 Advanced Settings contains the infrequently used project-input details,
 full-width output-folder controls, generation log, and optional paired-condition
 or two-group figure layouts. <strong>View Generation Log</strong> opens the live

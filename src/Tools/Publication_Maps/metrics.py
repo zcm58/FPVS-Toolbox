@@ -8,6 +8,7 @@ from functools import partial
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 import zipfile
 
 import numpy as np
@@ -40,10 +41,17 @@ from Tools.Publication_Maps.models import (
     PublicationMapRequest,
     PublicationMapResult,
     PublicationMetric,
+    ScalpMapGeometry,
     WorkbookEntry,
 )
-from Tools.Publication_Maps.scalp_io import biosemi64_names_upper, normalize_electrode_name
+from Tools.Publication_Maps.scalp_io import (
+    biosemi64_names_upper, normalize_electrode_name, recorded_map_geometry, require_compatible_geometry,
+)
 from Tools.Publication_Maps.xlsx_metric_reader import read_metric_sheet_selected_columns
+
+if TYPE_CHECKING:
+    from Main_App.processing.recorded_scalp_identity import RecordedScalpIdentity
+    from Tools.Publication_Maps.display_montage import DisplayMontage
 
 LONG_COLUMNS = [
     "condition",
@@ -105,6 +113,9 @@ class _ReleasedPublicationSource:
     allowed_auxiliary_rows: tuple[str, ...]
     observed_auxiliary_rows: tuple[str, ...]
     source_evidence_fingerprint: str
+    recorded_identity: RecordedScalpIdentity | None = None
+    recording_id: str = ""
+    participant_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +130,7 @@ def build_publication_map_result(
     request: PublicationMapRequest,
     *,
     cancel_check: Callable[[], None] | None = None,
+    load_fallback: Callable[[], DisplayMontage | None] | None = None,
 ) -> PublicationMapResult:
     """Build selected metric frames using Stats-selected harmonics."""
 
@@ -148,6 +160,11 @@ def build_publication_map_result(
         )
     except DatasetIndexError as exc:
         raise PublicationMapCohortError(f"Unable to index Scalp Maps workbooks: {exc}") from exc
+    if request.project_root is None and dataset_index.manifest is not None:
+        raise PublicationMapInputError(
+            f"Managed Scalp Maps input requires the active project root {dataset_index.project_root} "
+            "to verify its final QC release and electrode geometry."
+        )
     _cancellation_checkpoint(cancel_check)
     dataset_diagnostics = _dataset_diagnostics(
         dataset_index,
@@ -181,6 +198,9 @@ def build_publication_map_result(
         workbooks,
         managed_release,
     )
+    # Geometry belongs to the selected and released workbooks. Excluded
+    # recordings may legitimately use another cap or lack spatial data.
+    geometry = _released_geometry(released_sources.values(), request, load_fallback=load_fallback)
     group_id = None if group is None else group.group_id
     group_label = None if group is None else group.label
     group_folder = None if group is None else group.folder_name
@@ -206,6 +226,20 @@ def build_publication_map_result(
     )
     selection_metadata.update(release_metadata)
     qc_provenance.update(release_metadata)
+    if geometry is not None:
+        selection_metadata["scalp_map_coordinate_source"] = geometry.coordinate_source
+        selection_metadata["scalp_map_montage"] = geometry.montage_id
+        selection_metadata["scalp_map_geometry_recordings"] = [key for key, _ in geometry.source_positions]
+        if geometry.coordinate_source.startswith("display_template:"):
+            name = geometry.coordinate_source.removeprefix("display_template:")
+            diagnostics.append(Diagnostic(
+                level="info", code="display_montage", message=f"Using the selected display montage {name}.",
+            ))
+        elif geometry.coordinate_source == "recording" and len(geometry.source_positions) > 1:
+            diagnostics.append(Diagnostic(
+                level="info", code="measured_display_positions",
+                message="Scalp layout uses mean head-frame positions across the selected recordings.",
+            ))
     _cancellation_checkpoint(cancel_check)
     workbooks = _capture_workbook_identities(
         workbooks,
@@ -251,6 +285,7 @@ def build_publication_map_result(
         included_workbooks=workbooks,
         excluded_cohort=excluded_cohort,
         qc_provenance=qc_provenance,
+        geometry=geometry,
     )
 
 
@@ -611,7 +646,9 @@ def _require_managed_publication_release(
 
     if project_root is None:
         return None
+    from Main_App.processing.recorded_scalp_identity import RecordedScalpIdentity
     from Main_App.processing.roi_coverage import (
+        RetainedScalpIdentity,
         RoiCoverageGateError,
         require_project_final_release,
     )
@@ -641,6 +678,10 @@ def _require_managed_publication_release(
                 continue
             if source is None:
                 continue
+            identity = source.retained_scalp_identity
+            if not isinstance(identity, (RecordedScalpIdentity, RetainedScalpIdentity)):
+                raise RoiCoverageGateError("Released source has no qualified scalp geometry identity.")
+            recorded = identity if isinstance(identity, RecordedScalpIdentity) else None
             sources[workbook_path] = _ReleasedPublicationSource(
                 workbook_path=workbook_path,
                 retained_scalp_channels=tuple(
@@ -649,6 +690,9 @@ def _require_managed_publication_release(
                 allowed_auxiliary_rows=tuple(source.allowed_auxiliary_rows),
                 observed_auxiliary_rows=tuple(source.observed_auxiliary_rows),
                 source_evidence_fingerprint=str(source.fingerprint),
+                recorded_identity=recorded,
+                recording_id=cell.recording_id if recorded else "",
+                participant_id=cell.participant_id if recorded else "",
             )
         return _ManagedPublicationRelease(
             sources_by_workbook=sources,
@@ -721,6 +765,33 @@ def _require_released_publication_workbooks(
     return selected
 
 
+def _released_geometry(
+    sources: Iterable[_ReleasedPublicationSource], request: PublicationMapRequest,
+    *, load_fallback: Callable[[], DisplayMontage | None] | None = None,
+) -> ScalpMapGeometry | None:
+    from Main_App.processing.recorded_cohort_geometry import RECORDED_COHORT_GEOMETRY_VERSION
+
+    layouts = []
+    fallback = None
+    for source in sources:
+        if source.recorded_identity is None:
+            layouts.append(None)
+            continue
+        identity = source.recorded_identity.geometry
+        if identity["geometry_version"] == RECORDED_COHORT_GEOMETRY_VERSION:
+            owner = source.recording_id if identity["source_identity_kind"] == "recording_id" else source.participant_id
+            members = {key.casefold(): value for key, value in identity["source_geometries"].items()}
+            if owner.casefold() not in members:
+                raise PublicationMapInputError(f"Released workbook has no electrode geometry for {owner!r}.")
+            identity = members[owner.casefold()]
+        if identity["geometry_status"] != "available" and request.display_montage is not None and fallback is None:
+            from Tools.Publication_Maps.display_montage import load_display_montage
+
+            fallback = load_fallback() if load_fallback is not None else load_display_montage(request.display_montage)
+        layouts.append(recorded_map_geometry(identity, source_id=source.recording_id, display_montage=fallback))
+    return require_compatible_geometry(layouts)
+
+
 def _managed_publication_release_metadata(
     managed_release: _ManagedPublicationRelease | None,
     selected_sources: Mapping[Path, _ReleasedPublicationSource],
@@ -758,7 +829,6 @@ def _collect_metric_rows(
     ] | None = None,
     cancel_check: Callable[[], None] | None = None,
 ) -> list[tuple[object, ...]]:
-    montage_names = biosemi64_names_upper()
     rows: list[tuple[object, ...]] = []
     source_sheet = metric.source_sheet
     metric_label = metric.display_name
@@ -799,6 +869,7 @@ def _collect_metric_rows(
                 f"in {workbook.path.name} ({workbook.subject_id} / "
                 f"{workbook.condition}): {', '.join(missing_columns)}"
             )
+        source = None
         if managed_sources_by_workbook is not None:
             source = managed_sources_by_workbook.get(
                 workbook.path.expanduser().resolve(strict=False)
@@ -815,6 +886,12 @@ def _collect_metric_rows(
                 selected_columns=selected_columns,
                 released_source=source,
             )
+        if source is not None and source.recorded_identity is not None:
+            montage_names = frozenset(name.upper() for name in source.retained_scalp_channels)
+            montage_label = source.recorded_identity.montage_id
+        else:
+            montage_names = biosemi64_names_upper()
+            montage_label = "BioSemi64"
         normalized_electrodes = df_metric[ELECTRODE_COLUMN].map(normalize_electrode_name)
         duplicate_electrodes = sorted(
             set(normalized_electrodes[normalized_electrodes.ne("") & normalized_electrodes.duplicated(keep=False)]),
@@ -844,7 +921,7 @@ def _collect_metric_rows(
         finite_values = numeric_values.to_numpy(dtype=float, na_value=np.nan)
         if finite_values.size == 0 or not np.isfinite(finite_values).any():
             raise PublicationMapInputError(
-                f"No finite BioSemi64 values remain in requested {source_sheet} "
+                f"No finite {montage_label} values remain in requested {source_sheet} "
                 f"sheet for the selected harmonics: {workbook.path.name} "
                 f"({workbook.subject_id} / {workbook.condition}). Check blank or "
                 "nonnumeric cells and frequency-domain electrode exclusions."
@@ -857,7 +934,7 @@ def _collect_metric_rows(
                     code="unmapped_electrode",
                     condition=workbook.condition,
                     workbook=workbook.path.name,
-                    message="Workbook contains electrodes outside BioSemi64 montage.",
+                    message=f"Workbook contains electrodes outside {montage_label} montage.",
                     detail=", ".join(unmapped[:12]),
                 )
             )
@@ -909,7 +986,7 @@ def _validate_released_metric_source_rows(
     try:
         observed = validate_roi_source_rows(
             rows,
-            retained_scalp=released_source.retained_scalp_channels,
+            retained_scalp=released_source.recorded_identity or released_source.retained_scalp_channels,
             required_columns=selected_columns,
             electrode_column=ELECTRODE_COLUMN,
             allowed_auxiliary_rows=released_source.allowed_auxiliary_rows,

@@ -106,6 +106,41 @@ def test_paired_condition_components_cannot_form_the_same_raw_stem() -> None:
         _assert_unique_figure_stems(result, request)
 
 
+@pytest.mark.parametrize("montage", ["biosemi64", "GSN-HydroCel-128", "GSN-HydroCel-256"])
+def test_figure_electrodes_are_dots_without_channel_names(montage: str) -> None:
+    import matplotlib
+    from matplotlib.figure import Figure
+    import mne
+
+    from Main_App.io.recorded_eeg_geometry import attach_raw_recorded_geometry
+    from Tools.Publication_Maps.rendering import _draw_topomap
+    from Tools.Publication_Maps.scalp_io import recorded_map_geometry
+
+    channels = mne.channels.make_standard_montage(montage).ch_names
+    geometry = None
+    if montage != "biosemi64":
+        raw = mne.io.RawArray(np.zeros((len(channels), 4)), mne.create_info(channels, 100, "eeg"), verbose=False)
+        identity = attach_raw_recorded_geometry(
+            raw, montage_id=montage, template_montage=montage, hardware_platform="egi",
+        )
+        geometry = recorded_map_geometry(identity, source_id="synthetic-recording")
+    values = pd.DataFrame({"electrode": channels, "render_value": np.linspace(0, 1, len(channels))})
+    figure = Figure(figsize=(5, 3))
+    top, paired = figure.subplots(1, 2)
+    for view, ax in (("2d", top), ("3d", paired)):
+        _draw_topomap(
+            values, geometry=geometry, ax=ax, metric=PublicationMetric.BCA, cmap=matplotlib.colormaps["viridis"],
+            bounds=ColorBounds(), scalp_view=view,
+        )
+
+    assert len(top.collections[0].get_offsets()) == len(channels)
+    assert not top.texts
+    assert len(paired.child_axes) == 2
+    for child, view in zip(paired.child_axes, ("Front", "Back"), strict=True):
+        assert 0 < len(child.collections[0].get_offsets()) < len(channels)
+        assert [text.get_text() for text in child.texts] == [view]
+
+
 def test_alignment_omits_missing_sensors_without_zero_fill() -> None:
     values = pd.DataFrame(
         {
@@ -126,6 +161,41 @@ def test_alignment_omits_missing_sensors_without_zero_fill() -> None:
     assert missing_count == 60
     assert any("Non-finite" in diagnostic.message for diagnostic in diagnostics)
     assert any("omitted" in diagnostic.message for diagnostic in diagnostics)
+
+
+@pytest.mark.parametrize("compact", (False, True))
+def test_combined_projections_share_electrodes_palette_and_scale(compact, monkeypatch):
+    from matplotlib.figure import Figure
+    from Tools.Publication_Maps import rendering, scalp_surface
+
+    calls = []
+    draw_surface = scalp_surface.draw_scalp_surface
+    draw_top = rendering._plot_topomap_compat
+
+    def back(ax, data, info, *, view, cmap, norm):
+        calls.append((view, data, info, cmap, (norm.vmin, norm.vmax)))
+        draw_surface(ax, data, info, view=view, cmap=cmap, norm=norm)
+
+    def top(*, data, info, ax, cmap, vlim):
+        calls.append(("top", data, info, cmap, vlim))
+        return draw_top(data=data, info=info, ax=ax, cmap=cmap, vlim=vlim)
+
+    monkeypatch.setattr(scalp_surface, "draw_scalp_surface", back)
+    monkeypatch.setattr(rendering, "_plot_topomap_compat", top)
+    ax = Figure(figsize=(3, 3)).subplots()
+    frame = pd.DataFrame({"electrode": ["O1", "O2", "Pz", "F3", "F4"], "render_value": [1, 2, 1.25, 1.5, .6]})
+    cmap = rendering.colormap_for_metric(PublicationMetric.BCA, scalp_view="3d_2d")
+    mappable, missing = rendering._draw_topomap(
+        frame, ax=ax, metric=PublicationMetric.BCA, cmap=cmap, bounds=ColorBounds(), vlim_override=(0, 3),
+        scalp_view="3d_2d", compact=compact,
+    )
+    assert [call[0] for call in calls] == ["back", "top"]
+    assert calls[0][1] is calls[1][1] and calls[0][2] is calls[1][2]
+    assert calls[0][3] is calls[1][3] is mappable.cmap
+    assert calls[0][4] == calls[1][4] == mappable.get_clim() == (0, 3)
+    assert missing == 59
+    assert [child.texts[0].get_text() for child in ax.child_axes] == ["3D back · Sibson", "2D top · Cubic"]
+    assert len({rendering.figure_stem("Faces", view) for view in ("2d", "3d", "3d_2d")}) == 3
 
 
 def test_alignment_rejects_fewer_than_four_finite_sensors() -> None:
@@ -753,7 +823,10 @@ def test_two_group_comparison_rejects_request_result_identity_mismatch(
         render_group_comparison_figures(results, requests)
 
 
-def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("use_recorded", [False, True])
+def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
+    tmp_path, monkeypatch, use_recorded, hydrocel_geometry,
+):
     from Tools.Publication_Maps import scalp_scene, scalp_surface, worker
 
     root = tmp_path / "Project"
@@ -763,7 +836,11 @@ def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
     cohorts = {key: _comparison_result(key, title, scale=scale) for key, title, scale in (
         ("clinical", "Clinical", 10.0), ("control", "Control", 1.0),
     )}
+    first_electrode = hydrocel_geometry.channel_names[0] if use_recorded else "O1"
     for group_id, cohort in cohorts.items():
+        if use_recorded:
+            cohort.geometry = hydrocel_geometry
+            cohort.grand_average_values["electrode"] = hydrocel_geometry.channel_names
         source = tmp_path / f"{group_id}.xlsx"
         source.write_bytes(b"original")
         cohort.included_workbooks = _result_with_workbook_snapshot(source).included_workbooks
@@ -783,7 +860,7 @@ def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
     panels = preview.outcome.viewer_panels
     assert [p.title for p in panels] == ["Faces · Clinical", "Faces · Control"]
     assert [(p.norm.vmin, p.norm.vmax) for p in panels] == [(0.0, 40.0)] * 2
-    assert [dict(zip(p.info.ch_names, p.data, strict=True))["O1"] for p in panels] == [10.0, 1.0]
+    assert [dict(zip(p.info.ch_names, p.data, strict=True))[first_electrode] for p in panels] == [10.0, 1.0]
     assert all(p.output_root == output and p.input_root == requests[0].input_root for p in panels)
     assert all(p.output_base_root == output and p.project_root == root for p in panels)
     assert all(p.release_fingerprint == "current-release" for p in panels)
@@ -797,7 +874,7 @@ def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
     rendered = []
     def capture_export(ax, data, info, *, view, cmap, norm):
         if view == "front":
-            rendered.append((data, info.ch_names, (norm.vmin, norm.vmax)))
+            rendered.append((data, info.ch_names, (norm.vmin, norm.vmax), cmap))
         draw_surface(ax, data, info, view=view, cmap=cmap, norm=norm)
 
     with monkeypatch.context() as export_guard:
@@ -812,16 +889,87 @@ def test_group_surface_preview_and_export_share_limits_and_preserve_flat_figure(
     assert {path.suffix for path in batch.outcome.batch_figure_paths} == {".pdf", ".png"}
     for path in batch.outcome.batch_figure_paths:
         assert path.stem == flat.stem + "_3d" and path.stat().st_size > 1000
-    for surface, (data, names, limits) in zip((*panels, *panels), rendered, strict=True):
+    # PNG and PDF save the same figure; build each group's surface only once.
+    for surface, (data, names, limits, cmap) in zip(panels, rendered, strict=True):
         np.testing.assert_array_equal(surface.data, data)
         assert surface.info.ch_names == names
         assert (surface.norm.vmin, surface.norm.vmax) == limits
+        assert cmap.name == surface.cmap.name == "FpvsPublicationScalp3D"
+        np.testing.assert_array_equal(cmap(np.linspace(0, 1, 256)), surface.cmap(np.linspace(0, 1, 256)))
 
     panels[0].source_workbooks[1].path.write_bytes(b"edited after analysis")
     stale = PublicationMapsWorker(requests, preview_only=True)
     stale.run()
     assert stale.outcome.status is PublicationMapsOutcomeStatus.ERROR
     assert not stale.outcome.viewer_panels and not stale.outcome.batch_figure_paths
+
+
+@pytest.mark.parametrize(("view", "paired", "multi_metric"), [
+    ("2d", False, False), ("2d", True, True), ("3d", True, False), ("3d", True, True),
+    ("3d_2d", False, False), ("3d_2d", True, False), ("3d_2d", True, True),
+])
+def test_named_montage_reaches_each_ordinary_and_paired_figure(
+    tmp_path, monkeypatch, hydrocel_geometry, view, paired, multi_metric,
+):
+    from Tools.Publication_Maps import rendering, scalp_surface
+    from Tools.Publication_Maps.scalp_scene import build_surface_panels
+
+    result = _comparison_result("clinical", "Clinical", scale=1.0)
+    result.geometry = hydrocel_geometry
+    names = hydrocel_geometry.channel_names
+    frame = result.grand_average_values.assign(electrode=names)
+    conditions = ("Faces", "Objects") if paired else ("Faces",)
+    metrics = (PublicationMetric.BCA, PublicationMetric.SNR) if multi_metric else (PublicationMetric.BCA,)
+    result.grand_average_values = pd.concat([
+        frame.assign(condition=condition, metric=metric.value) for condition in conditions for metric in metrics
+    ])
+    request = PublicationMapRequest(
+        input_root=tmp_path / "inputs", output_root=tmp_path / "maps", conditions=conditions,
+        metrics=metrics, export_pdf=False, png_dpi=72, scalp_view=view,
+        export_paired_figures=paired, paired_conditions=conditions if paired else (),
+    )
+    seen = []
+    if view == "2d":
+        draw = rendering._plot_topomap_compat
+
+        def capture(*, data, info, **kwargs):
+            seen.append(tuple(info.ch_names))
+            return draw(data=data, info=info, **kwargs)
+
+        monkeypatch.setattr(rendering, "_plot_topomap_compat", capture)
+    else:
+        draw = scalp_surface.draw_scalp_surface
+
+        def capture(ax, data, info, **kwargs):
+            seen.append(tuple(info.ch_names))
+            return draw(ax, data, info, **kwargs)
+
+        monkeypatch.setattr(scalp_surface, "draw_scalp_surface", capture)
+    paths = rendering.render_publication_figures(result, request)
+    assert paths and all(path.is_file() and path.parent.name == "Clinical" for path in paths)
+    assert seen and all(channels == names for channels in seen)
+    panels = build_surface_panels([result], [dataclasses.replace(request, scalp_view="3d")], cancel_check=lambda: None)
+    assert len(panels) == len(conditions) * len(metrics)
+    for panel in panels:
+        assert tuple(panel.info.ch_names) == names
+        np.testing.assert_array_equal(panel.data, [1.0, 2.0, 3.0, 4.0])
+
+
+def test_group_comparison_rejects_incompatible_caps_before_output_or_preview(tmp_path, hydrocel_geometry):
+    from Tools.Publication_Maps.scalp_scene import build_surface_panels
+
+    root = tmp_path / "Project"
+    requests = _group_comparison_requests(root, tmp_path / "figures")
+    results = [_comparison_result(r.group_id, r.group_label, scale=1.) for r in requests]
+    results[0].geometry = hydrocel_geometry
+    results[1].geometry = dataclasses.replace(hydrocel_geometry, montage_id="different-layout")
+    for result in results:
+        result.grand_average_values["electrode"] = hydrocel_geometry.channel_names
+    with pytest.raises(PublicationMapInputError, match="(?i)montage|geometry|layout"):
+        render_group_comparison_figures(results, requests)
+    with pytest.raises(PublicationMapInputError, match="(?i)montage|geometry|layout"):
+        build_surface_panels(results, requests, cancel_check=lambda: None)
+    assert not requests[0].output_root.exists()
 
 
 def test_paired_surface_viewer_keeps_group_folder_and_selected_pair_order(tmp_path):

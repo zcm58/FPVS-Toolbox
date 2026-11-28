@@ -51,6 +51,7 @@ from Main_App.projects import (
     load_project_dataset_index,
     resolve_active_project_root,
 )
+from Tools.Publication_Maps.colormaps import scalp_color_endpoints
 from Tools.Publication_Maps.generation_outcome import (
     PublicationMapsOutcomeStatus,
     PublicationMapsWorkerOutcome,
@@ -58,8 +59,6 @@ from Tools.Publication_Maps.generation_outcome import (
 from Tools.Publication_Maps.log_dialog import ScalpMapsGenerationLogDialog
 from Tools.Publication_Maps.models import (
     ColorBounds,
-    DEFAULT_BCA_HIGH_COLOR,
-    DEFAULT_BCA_LOW_COLOR,
     DEFAULT_Z_SCORE_THRESHOLD,
     PublicationMapRequest,
     PublicationMetric,
@@ -129,8 +128,8 @@ class PublicationMapsWindow(QWidget):
         self._cancel_requested = False
         self._preview_only = False
         self._scalp_viewer = None
-        self.bca_low_color = DEFAULT_BCA_LOW_COLOR
-        self.bca_high_color = DEFAULT_BCA_HIGH_COLOR
+        self.bca_low_color: str | None = None
+        self.bca_high_color: str | None = None
         self._dataset_index: ProjectDatasetIndex | None = None
         self._conditions: tuple[str, ...] = ()
         self._condition_counts: dict[str, int] = {}
@@ -240,9 +239,40 @@ class PublicationMapsWindow(QWidget):
 
         form.addRow("Excel root folder:", self.input_root_row)
         form.addRow("Group:", self.group_combo)
+        from Tools.Publication_Maps.display_montage import display_montage_choices
+
+        self.montage_combo = QComboBox(group)
+        self.montage_combo.setAccessibleName("Fallback electrode montage")
+        self.montage_combo.addItem("Use recording coordinates only", None)
+        for template_id, label in display_montage_choices():
+            self.montage_combo.addItem(label, template_id)
+        self.montage_combo.setToolTip(
+            "When a recording lacks positions, choose the cap used for acquisition. "
+            "Every retained electrode label must match."
+        )
+        montage_row = QHBoxLayout()
+        montage_row.addWidget(self.montage_combo, 1)
+        self.montage_file_btn = make_action_button("Choose coordinate file…", compact=True, parent=group)
+        self.montage_file_btn.clicked.connect(self._choose_montage_file)
+        montage_row.addWidget(self.montage_file_btn)
+        form.addRow("Fallback montage:", montage_row)
         form.addRow("", self.refresh_btn)
         group.content_layout.addLayout(form)
         return group
+
+    def _choose_montage_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Choose electrode coordinates", str(self._project_root or self.input_root_edit.text()),
+            "Electrode coordinates (*.csv *.tsv *.fif *.bvct)",
+        )
+        if filename:
+            path = Path(filename)
+            if isinstance(self.montage_combo.itemData(self.montage_combo.count() - 1), Path):
+                self.montage_combo.removeItem(self.montage_combo.count() - 1)
+            self.montage_combo.addItem(path.name, path)
+            index = self.montage_combo.count() - 1
+            self.montage_combo.setItemData(index, str(path), Qt.ToolTipRole)
+            self.montage_combo.setCurrentIndex(index)
 
     def _build_conditions_group(self) -> SectionCard:
         group = SectionCard("Map selection", object_name="publication_maps_conditions")
@@ -724,13 +754,16 @@ class PublicationMapsWindow(QWidget):
         self.scalp_view_combo.setAccessibleName("Scalp map export view")
         self.scalp_view_combo.addItem("2D top view", "2d")
         self.scalp_view_combo.addItem("3D front and back", "3d")
+        self.scalp_view_combo.addItem("3D back + 2D top", "3d_2d")
         self.scalp_view_combo.setToolTip(
-            "The 3D figure shows the same electrode measurements on the front and back of a template scalp."
+            "The combined view uses cubic interpolation for 2D and natural-neighbor interpolation for 3D. "
+            "Both use the same electrode values and color scale."
         )
         form.addRow("Export view:", self.scalp_view_combo)
         form.addRow("Map types:", self._build_metric_selection(group))
         layout.addLayout(form)
         self.map_settings_section = self._build_map_settings_section(group)
+        self.scalp_view_combo.currentIndexChanged.connect(self._apply_bca_color_button_styles)
         layout.addWidget(self.map_settings_section)
 
         self.progress = QProgressBar(group)
@@ -849,6 +882,9 @@ class PublicationMapsWindow(QWidget):
 
     def _on_input_root_changed(self, _text: str) -> None:
         self._close_scalp_viewer()
+        self.montage_combo.setCurrentIndex(0)
+        if isinstance(self.montage_combo.itemData(self.montage_combo.count() - 1), Path):
+            self.montage_combo.removeItem(self.montage_combo.count() - 1)
         self.status_label.setVisible(True)
         self._dataset_index = None
         self._refresh_session_controls(None)
@@ -1670,12 +1706,17 @@ class PublicationMapsWindow(QWidget):
         selected = set(self._selected_conditions())
         return bool(first and second and first != second and first in selected and second in selected)
 
+    def _current_color_endpoints(self) -> tuple[str, str]:
+        return scalp_color_endpoints(self.scalp_view_combo.currentData(), self.bca_low_color, self.bca_high_color)
+
     def _apply_bca_color_button_styles(self) -> None:
-        self.color_low_btn.setStyleSheet(f"background-color: {self.bca_low_color};")
-        self.color_high_btn.setStyleSheet(f"background-color: {self.bca_high_color};")
+        low, high = self._current_color_endpoints()
+        self.color_low_btn.setStyleSheet(f"background-color: {low};")
+        self.color_high_btn.setStyleSheet(f"background-color: {high};")
 
     def _choose_bca_color(self, which: str) -> None:
-        init = self.bca_low_color if which == "low" else self.bca_high_color
+        low, high = self._current_color_endpoints()
+        init = low if which == "low" else high
         color = QColorDialog.getColor(QColor(init), self)
         if not color.isValid():
             return
@@ -1721,6 +1762,8 @@ class PublicationMapsWindow(QWidget):
         return (
             self.input_root_row,
             self.group_combo,
+            self.montage_combo,
+            self.montage_file_btn,
             self.refresh_btn,
             self.conditions_list,
             self.select_all_btn,
@@ -1856,6 +1899,7 @@ class PublicationMapsWindow(QWidget):
                 conditions=selected_conditions,
                 metrics=metrics,
                 scalp_view="3d" if preview_only else self.scalp_view_combo.currentData(),
+                display_montage=self.montage_combo.currentData(),
                 color_bounds=color_bounds,
                 export_png=True,
                 export_pdf=True,

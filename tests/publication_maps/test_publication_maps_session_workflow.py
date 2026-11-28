@@ -180,6 +180,7 @@ def _renderable_session_panel_set() -> SimpleNamespace:
         condition="Extended Visual Recognition and Attention Condition",
         metric=PublicationMetric.BCA,
         group_ids=group_ids,
+        geometry=None,
         session_ids=session_ids,
         common_vmin=0.0,
         common_vmax=2.0,
@@ -283,7 +284,7 @@ def test_managed_maps_omit_scoped_qc_cells_before_reads_and_preserve_other_cells
             downstream_cell_excluded=record.path.resolve() in excluded_paths,
             # Final coverage retains source evidence even for excluded cells.
             source_evidence=SimpleNamespace(
-                retained_scalp_identity=SimpleNamespace(channels=("Cz",)),
+                retained_scalp_identity=roi_coverage.RetainedScalpIdentity(channels=("Cz",)),
                 allowed_auxiliary_rows=(), observed_auxiliary_rows=(),
                 fingerprint=f"source:{record.path}",
             ),
@@ -735,7 +736,10 @@ def test_session_z_scale_uses_threshold_when_upper_bound_is_automatic(maximum, e
 
 
 @pytest.mark.parametrize("preview_only", [False, True])
-def test_surface_session_grid_aggregates_once_per_export_or_preview(tmp_path, monkeypatch, preview_only):
+@pytest.mark.parametrize("use_recorded", [False, True])
+def test_surface_session_grid_aggregates_once_per_export_or_preview(
+    tmp_path, monkeypatch, preview_only, use_recorded, hydrocel_geometry,
+):
     from unittest.mock import Mock
     from Tools.Publication_Maps import scalp_scene
 
@@ -745,7 +749,9 @@ def test_surface_session_grid_aggregates_once_per_export_or_preview(tmp_path, mo
     results = _session_results_for_records(index.workbooks, requests)
     for result in results:
         source = result.long_values
-        result.long_values = pd.concat([source.assign(electrode=name) for name in ("Fz", "Cz", "O1", "O2")])
+        result.geometry = hydrocel_geometry if use_recorded else None
+        names = hydrocel_geometry.channel_names if use_recorded else ("Fz", "Cz", "O1", "O2")
+        result.long_values = pd.concat([source.assign(electrode=name) for name in names])
     monkeypatch.setattr(session_workflow, "load_publication_dataset_index", lambda *args, **kwargs: index)
     monkeypatch.setattr(publication_worker, "build_publication_map_result",
                         lambda request, **_: next(result for result in results if result.group_id == request.group_id))
@@ -766,9 +772,12 @@ def test_surface_session_grid_aggregates_once_per_export_or_preview(tmp_path, mo
     assert len(panels) == 6 and len({p.label for p in panels}) == 6
     assert all(p.output_root == requests[0].output_root for p in panels)
     assert len({(p.norm.vmin, p.norm.vmax) for p in panels[:4]}) == 1
+    assert all(panel.cmap.name == "FpvsPublicationScalp3D" for panel in panels[:4])
+    assert all(set(panel.info.ch_names) == set(names) for panel in panels)
     for panel in panels[4:]:
         assert " − " in panel.title
         assert panel.cmap.name == "RdBu_r" and panel.norm.vmin == -panel.norm.vmax
+        assert panel.norm(0) == 0.5
         assert len(set(panel.data)) == 1 and abs(panel.data[0]) == 2
 
 

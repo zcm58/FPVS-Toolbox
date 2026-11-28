@@ -8,7 +8,7 @@ from typing import Any
 from Main_App.io.acquisition_metadata import resolve_spatial_tool_capability
 
 _TEMPLATE_SPATIAL_TOOLS = frozenset({
-    "LORETA Visualizer", "Free Harmonic Clustering Analysis", "Scalp Maps",
+    "LORETA Visualizer", "Free Harmonic Clustering Analysis",
 })
 
 

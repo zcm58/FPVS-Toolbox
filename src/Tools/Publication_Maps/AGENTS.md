@@ -3,13 +3,14 @@ current implementation renders condition-level grand-average BCA, SNR, and
 z-score scalp maps using the exact versioned harmonic selection saved at processing
 completion.
 
-The current numerical/geometry path uses BioSemi64 (`scalp_io.py` and
-`metrics.py`). Future montage support follows the
-[shared hardware/pipeline roadmap](../../../docs/agent/architecture/hardware-pipeline-studio-roadmap.md):
-consume qualified montage geometry and canonical electrode identities through
-shared owners. Successful loading or Studio import does not establish scalp-map
-support. Do not silently intersect an unknown montage with BioSemi64, invent
-positions, zero-fill missing sensors, or enable unqualified interpolation.
+Use the released recording's scalp-channel identities and head-frame positions
+through `metrics.py` and `scalp_io.py`. The historical fixed BioSemi64 path
+retains its established coordinate definition. Other supported recordings can
+supply measured or explicitly configured cap positions. If that evidence
+lacks positions, an explicitly selected display montage may supply them by
+matching every retained label. Keep the recording and processing geometry
+intact. Do not infer a montage from names or count, zero-fill missing sensors,
+or use the display fallback to change processing or QC.
 
 Scalp Maps is an embedded beta tool. Expose it only through the Main App's
 central `BETA_TOOL_SPECS` registry so the shared visibility gate and
@@ -89,10 +90,17 @@ Rules:
   with numerical zero. Render only finite defined sensors, require the
   documented minimum non-collinear coverage, and exclude missing sensors from
   interpolation and color scaling.
+- Mark contributing electrode locations with dark dots in the viewer and all
+  exported views. Omit electrode names from the artwork, including dense caps.
 - **Export view** defaults to the existing 2D top view. The 3D option draws
-  front and back views of MNE's bundled generic head using the same finite
-  BioSemi64 values, metric limits and montage checks. The template and display
-  interpolation belong to the renderer. Keep electrode alignment, missing-data
+  front and back views of the bundled generic head using the same finite
+  electrode values, metric limits and montage checks. The template and display
+  interpolation belong to the renderer. Use Sibson natural-neighbor interpolation
+  inside the finite electrode hull for both 3D paths. Keep MNE's cubic
+  interpolation in every 2D top view. **3D back + 2D top** draws the two
+  methods independently from the same electrodes, with one palette and scale.
+  Label each method and give the combined figure a distinct output filename.
+  Keep electrode alignment, missing-data
   coverage and observer orientation covered by tests. Keep 3D exports distinct
   from 2D files for every supported figure layout. **View in 3D** opens a
   native trackball viewer from the same qualified request without writing
@@ -187,8 +195,11 @@ Rules:
 - SNR uses the same color endpoints. The fixed SNR range is optional: it starts
   checked with a `1.0` to `1.5 SNR` range; unchecked maps auto-scale.
 - Shared BCA/SNR scalp-map color stops live in
-  `src/Tools/Publication_Maps/colormaps.py`; edit the shared ramp there instead
-  of introducing metric-specific copies in Scalp Maps renderers.
+  `src/Tools/Publication_Maps/colormaps.py`. The 2D and publication-style 3D
+  ramps have separate defaults. Use the same 3D ramp, custom endpoints and
+  normalization for the viewer, color swatches, figure legends and exports.
+  Keep unsupported skin gray, subthreshold Z white and signed differences
+  centered at zero.
 - The BCA colorbar label is `Baseline-corrected amplitude (µV)`. Figure fonts
   should use `Main_App.exports.figure_style`, not GUI typography roles or
   one-off Matplotlib defaults.

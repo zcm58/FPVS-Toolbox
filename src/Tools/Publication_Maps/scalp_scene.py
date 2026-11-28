@@ -69,11 +69,11 @@ def build_surface_panels(
     release_fingerprint, = release_fingerprints
 
     def add(
-        frame, names, metric, bounds, *, limits=None, difference=False,
+        frame, names, metric, bounds, *, geometry, limits=None, difference=False,
         output_root=first.output_root,
     ) -> None:
         cancel_check()
-        data, info, missing, _ = align_render_values(frame)
+        data, info, missing, _ = align_render_values(frame, geometry=geometry)
         vlim = limits or _metric_limits(data, metric=metric, bounds=bounds)
         data.flags.writeable = False
         title = " · ".join(str(name) for name in names if name)
@@ -85,7 +85,7 @@ def build_surface_panels(
             colorbar_label=colorbar_label_for_metric(metric),
             data=data,
             info=info,
-            cmap=matplotlib.colormaps["RdBu_r"] if difference else colormap_for_metric(metric, bounds),
+            cmap=matplotlib.colormaps["RdBu_r"] if difference else colormap_for_metric(metric, bounds, scalp_view="3d"),
             norm=Normalize(*vlim),
             extend="neither" if difference else _colorbar_extend(metric),
             missing_count=missing,
@@ -107,7 +107,7 @@ def build_surface_panels(
                     panel = panel_set.panel(group_id, session)
                     add(
                         _panel_frame(panel), (panel_set.condition, panel.group_label, panel.session_label),
-                        metric, bounds, limits=limits,
+                        metric, bounds, geometry=panel_set.geometry, limits=limits,
                     )
             if first.export_paired_session_difference:
                 limit = _difference_limit(panel_set)
@@ -116,10 +116,10 @@ def build_surface_panels(
                     contrast = f"{diff.comparison_session_label} − {diff.reference_session_label}"
                     add(
                         _difference_frame(diff), (panel_set.condition, diff.group_label, contrast),
-                        metric, bounds, limits=(-limit, limit), difference=True,
+                        metric, bounds, geometry=panel_set.geometry, limits=(-limit, limit), difference=True,
                     )
     elif first.export_group_comparison_figure:
-        _validate_group_comparison_results(results, requests)
+        geometry = _validate_group_comparison_results(results, requests)
         condition, = first.conditions
         titles = _group_comparison_titles(requests)
         for metric in _request_metrics(first):
@@ -129,9 +129,9 @@ def build_surface_panels(
                 for result, request in zip(results, requests, strict=True)
             ]
             bounds = first.color_bounds.get(metric, ColorBounds())
-            limits = _paired_vlim(*frames, metric=metric, bounds=bounds)
+            limits = _paired_vlim(*frames, metric=metric, bounds=bounds, geometry=geometry)
             for title, frame in zip(titles, frames, strict=True):
-                add(frame, (condition, title), metric, bounds, limits=limits)
+                add(frame, (condition, title), metric, bounds, geometry=geometry, limits=limits)
     else:
         for result, request in zip(results, requests, strict=True):
             grand = result.grand_average_values
@@ -145,17 +145,17 @@ def build_surface_panels(
                     for metric in _request_metrics(request):
                         frames = [_pair_group(grand, condition, metric=metric) for condition in conditions]
                         bounds = request.color_bounds.get(metric, ColorBounds())
-                        limits = _paired_vlim(*frames, metric=metric, bounds=bounds)
+                        limits = _paired_vlim(*frames, metric=metric, bounds=bounds, geometry=result.geometry)
                         for condition, frame in zip(conditions, frames, strict=True):
                             add(
                                 frame, (condition, *context), metric, bounds,
-                                limits=limits, output_root=output_root,
+                                geometry=result.geometry, limits=limits, output_root=output_root,
                             )
             else:
                 for (condition, metric_value, _), frame in grand.groupby(["condition", "metric", "map_label"], dropna=False):
                     metric = PublicationMetric(metric_value)
                     add(frame[frame["is_montage_electrode"]], (condition, *context), metric,
-                        request.color_bounds.get(metric, ColorBounds()), output_root=output_root)
+                        request.color_bounds.get(metric, ColorBounds()), geometry=result.geometry, output_root=output_root)
     if not panels:
         raise PublicationMapInputError("No scalp values are available for the selected 3D views.")
     return tuple(panels)

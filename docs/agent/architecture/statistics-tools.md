@@ -54,13 +54,26 @@ Primary paths:
   selected metric columns per electrode before condition-level averaging and
   transactional PNG/PDF figure export. It does not write auxiliary source-data
   workbooks.
-  The 3D option displays those same electrode aggregates on MNE's bundled
-  fsaverage outer head. Front and back views share a color scale. The BioSemi64
-  sensor directions are aligned to the template in head coordinates. Linear
-  interpolation in an azimuthal equidistant projection colors the region
-  within the finite sensors' convex hull. Gray anatomy outside that region
-  has no displayed value. Dots mark contributing electrodes visible from each
-  direction. The native PyVistaQt viewer shares the LORETA desktop OpenGL
+  The 3D option displays those same electrode aggregates on a bundled generic
+  MakeHuman head aligned to the head-coordinate landmarks. The mesh
+  is a display template. Its skin, ears and face provide anatomical context.
+  Front and back views share a color scale. The default 3D magnitude palette
+  draws on the appearance of Figure 5A of Feuerriegel et al. (2018). The
+  article does not specify the surface interpolation used for that figure.
+  The colorbar shows the unshaded palette. A soft overhead light modulates
+  chromatic paint on the cap while preserving hue and coverage.
+  Subthreshold Z stays white. The 3D field uses Sibson natural-neighbor
+  coordinates in an azimuthal equidistant cap projection. The native viewer
+  and print renderer sample the same field at a resolution adapted to electrode
+  spacing and preserve the value at every electrode. They interpolate scalar
+  values before applying the palette or Z threshold.
+  Every 2D top view uses MNE's cubic interpolation and extrapolates to the
+  head outline. The combined 3D back and 2D top export labels the separate
+  interpolation methods and shares the electrode values, palette and scale.
+  The 3D field covers the finite sensors' convex hull. Gray anatomy outside
+  that region has no displayed value. Dots mark contributing electrodes visible from each
+  direction. The native and exported front/back presets use the same viewing
+  angles. The native PyVistaQt viewer shares the LORETA desktop OpenGL
   check and supports rotation, zoom and pan. Switching panels retains the
   camera. Opening the viewer writes no files. Exporting a chosen view checks
   its source identities and managed QC release again before publishing the
@@ -77,9 +90,24 @@ Primary paths:
   BCA colorbar label is
   `Baseline-corrected amplitude (µV)`.
 
-**BioSemi64 geometry eligibility.**
+### Scalp-map electrode geometry
 
-Current FullFFT analysis starts from processing-owned neutral provenance that
+Managed maps use the selected QC-released
+recordings' head-frame coordinates in metres, including measured layouts and
+explicit cap templates. The display preserves the existing BioSemi64 mapping.
+For compatible measured layouts it averages each electrode's position across
+distinct contributing recordings once. Comparison panels share this geometry.
+Cohorts must agree on hardware, montage, channel mapping, scalp and reference
+identities, and the source of positions. A selected fallback supplies a
+complete matching set of positions for a recording without usable geometry.
+Its name and use are recorded in the analysis metadata. Fallback files accept
+head-coordinate tables, dig FIF or CapTrak BVCT. The position selection applies
+only to the visualization. Four finite, non-collinear electrodes are required
+for an interpolated map.
+
+### BioSemi64 geometry eligibility for fixed-model analyses
+
+Fixed-model Free Harmonic Clustering starts from processing-owned FullFFT provenance that
 contains the complete canonical BioSemi64 geometry identity. Every active
 workbook must match a completed processing-ledger row with the same montage,
 geometry version, coordinate fingerprint, mapping profile, retained sensor set,

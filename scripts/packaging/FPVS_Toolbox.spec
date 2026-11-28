@@ -18,6 +18,7 @@ datas = [
     (str(metadata), "."),
     (str(APP_ICON), "assets"),
     (str(REPO_ROOT / "assets" / "experiment_library"), "assets/experiment_library"),
+    (str(SRC_ROOT / "Tools" / "Publication_Maps" / "data"), "Tools/Publication_Maps/data"),
     (str(SRC_ROOT / "Main_App" / "gui" / "checkbox-check.svg"), "Main_App/gui"),
     (str(SRC_ROOT / "Main_App" / "gui" / "checkbox-check-dark.svg"), "Main_App/gui"),
     (str(SRC_ROOT / "Main_App" / "gui" / "chevron-down.svg"), "Main_App/gui"),

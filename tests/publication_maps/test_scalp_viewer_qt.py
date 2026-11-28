@@ -10,6 +10,7 @@ from matplotlib.colors import Normalize
 import numpy as np
 import pyvista as pv
 import pytest
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QPushButton, QWidget
 from shiboken6 import delete
 
@@ -47,6 +48,7 @@ class _Display(QWidget):
     def add_points(self, points, *, name, point_size, **kwargs):
         actor = pv.Actor()
         actor.prop.point_size = point_size
+        self.point_locations = np.asarray(points)
         self.actors[name] = actor
         return actor
 
@@ -98,12 +100,17 @@ def dialog(qtbot, panels, monkeypatch):
 
 
 def test_camera_presets_zoom_and_live_view_export_survive_switching_metric(dialog, qtbot, tmp_path, monkeypatch):
+    assert set(dialog._plotter.actors) == {"scalp", "values", "electrodes"}
+    assert len(dialog._plotter.point_locations) == len(dialog.current_panel.info.ch_names)
+    assert dialog._plotter.actors["electrodes"].prop.point_size > 0
     for name, axis, sign in (("Front", 1, 1), ("Left", 0, -1), ("Right", 0, 1), ("Top", 2, 1), ("Back", 1, -1)):
         dialog.camera_combo.setCurrentText(name)
         dialog.camera_combo.activated.emit(dialog.camera_combo.currentIndex())
         camera = dialog._plotter.camera
         direction = np.asarray(camera.position) - camera.focal_point
-        assert sign * direction[axis] > 0.5
+        assert sign * direction[axis] / np.linalg.norm(direction) > 0.8
+        if name in ("Front", "Back"):
+            np.testing.assert_allclose(direction / np.linalg.norm(direction), scalp_viewer._camera(name.lower())[2])
     camera.Azimuth(29)
     offset = np.array([0.012, -0.006, 0.003])
     camera.position = np.asarray(camera.position) + offset
@@ -187,6 +194,22 @@ def test_close_during_export_cancels_publication(dialog, qtbot, tmp_path, monkey
     assert not target.exists() and not target.with_suffix(".pdf").exists()
 
 
+def test_export_starts_before_restored_viewport_redraw(dialog, qtbot, tmp_path, monkeypatch):
+    original_size = dialog._electrodes.prop.point_size
+    redraws = []
+
+    def render():
+        redraws.append((dialog._job is not None, dialog._electrodes.prop.point_size))
+        raise RuntimeError("Viewport unavailable after capture")
+
+    monkeypatch.setattr(dialog._plotter, "render", render)
+    monkeypatch.setattr(scalp_viewer, "export_camera_view", lambda _img, _panel, name, _check: (name,))
+    dialog.export_view(tmp_path / "snapshot.png")
+    qtbot.waitUntil(lambda: dialog.export_button.isEnabled())
+    assert redraws == [(True, original_size)]
+    assert "Saved PNG and PDF" in dialog.status.text()
+
+
 def test_capture_failure_restores_display_and_leaves_viewer_usable(dialog, tmp_path, monkeypatch):
     size = dialog._plotter.actors["electrodes"].prop.point_size
 
@@ -210,6 +233,38 @@ def test_missing_desktop_graphics_fails_before_vtk_context_creation(qtbot, panel
     monkeypatch.setitem(sys.modules, "pyvistaqt", SimpleNamespace(QtInteractor=lambda *_a, **_k: pytest.fail("VTK started")))
     with pytest.raises(RuntimeError, match="OpenGL 3.2"):
         scalp_viewer.ScalpSurfaceDialog(panels)
+
+
+@pytest.mark.parametrize("context_fails", [False, True])
+def test_first_surface_waits_for_native_graphics_even_if_setup_processes_events(qtbot, panels, monkeypatch, context_fails):
+    prepared = Event()
+    original_build = scalp_viewer.build_scalp_surface_scene
+
+    def build(*args, **kwargs):
+        scene = original_build(*args, **kwargs)
+        prepared.set()
+        return scene
+
+    def open_context(parent, *, auto_update):
+        assert prepared.wait(5)
+        QTest.qWait(20)
+        assert parent._job is not None and not parent._ready
+        if context_fails:
+            raise RuntimeError("Cannot open native display")
+        return _Display(parent, auto_update=auto_update)
+
+    monkeypatch.setattr(scalp_viewer, "build_scalp_surface_scene", build)
+    monkeypatch.setattr(scalp_viewer, "require_desktop_opengl", lambda _: None)
+    monkeypatch.setitem(sys.modules, "pyvistaqt", SimpleNamespace(QtInteractor=open_context))
+    if context_fails:
+        with pytest.raises(RuntimeError, match="Cannot open native display"):
+            scalp_viewer.ScalpSurfaceDialog(panels)
+        QTest.qWait(20)
+    else:
+        viewer = scalp_viewer.ScalpSurfaceDialog(panels)
+        viewer.show()
+        qtbot.waitUntil(lambda: viewer.export_button.isEnabled())
+        viewer.close()
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

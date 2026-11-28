@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from Tools.Publication_Maps.models import PublicationMetric
+from Tools.Publication_Maps.models import PublicationMetric, ScalpMapGeometry
 
 
 class RepeatedSessionMapIdentityError(ValueError):
@@ -96,6 +96,7 @@ class SessionMapPanelSet:
     paired_differences: tuple[PairedSessionDifferenceMap, ...]
     difference_vmin: float | None
     difference_vmax: float | None
+    geometry: ScalpMapGeometry | None = None
 
     def panel(self, group_id: str, session_id: str) -> SessionMapPanel:
         """Return one exact group/session panel or raise ``KeyError``."""
@@ -592,6 +593,7 @@ def build_repeated_session_map_panels(
     selected_harmonics_hz: Sequence[float],
     group_ids: Sequence[str] | None = None,
     session_ids: Sequence[str] | None = None,
+    geometry: ScalpMapGeometry | None = None,
 ) -> SessionMapPanelSet:
     """Build a canonical 2x2 group/session grid and paired session differences.
 
@@ -666,8 +668,10 @@ def build_repeated_session_map_panels(
         raise RepeatedSessionMapDataError(
             "Canonical recording(s) have no exact selected-harmonic map rows: " + ", ".join(missing_recordings)
         )
+    # Auxiliary channels remain in the source tables. Only located scalp
+    # electrodes contribute to a figure's participant counts and color scales.
     recording_values = _recording_values(
-        frame,
+        frame.loc[frame["is_montage_electrode"].eq(True)],
         metric=resolved_metric,
         harmonic_count=harmonic_count,
     )
@@ -745,6 +749,7 @@ def build_repeated_session_map_panels(
         paired_differences=paired,
         difference_vmin=difference_vmin,
         difference_vmax=difference_vmax,
+        geometry=geometry,
     )
 
 

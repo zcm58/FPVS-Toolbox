@@ -20,7 +20,7 @@ from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
 from Tools.LORETA_Visualizer.graphics_support import require_desktop_opengl
 from Tools.Publication_Maps.generation_outcome import PublicationMapGenerationCancelled
 from Tools.Publication_Maps.rendering import sanitize_filename_stem
-from Tools.Publication_Maps.scalp_surface import build_scalp_surface_scene
+from Tools.Publication_Maps.scalp_surface import _camera, build_scalp_surface_scene
 from Tools.Publication_Maps.scalp_view_export import VIEW_IMAGE_WIDTH_IN, draw_view_scale, export_camera_view
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ class ScalpSurfaceDialog(QDialog):
         self._plotter = None
         self._job = None
         self._closed = False
+        self._graphics_ready = Event()
         self._cancel = Event()
         self._ready = False
         self._camera_initialized = False
@@ -86,21 +87,6 @@ class ScalpSurfaceDialog(QDialog):
         canvas_row = QHBoxLayout()
         canvas_row.setSpacing(0)
         layout.addLayout(canvas_row, 1)
-        try:
-            require_desktop_opengl(self)
-            from pyvistaqt import QtInteractor
-
-            self._plotter = QtInteractor(self, auto_update=False)
-            self._plotter.setObjectName("scalp3dInteractor")
-            self._plotter.enable_trackball_style()
-            self._plotter.set_background("white")
-            self._plotter.enable_parallel_projection()
-            canvas_row.addWidget(self._plotter, 1)
-        except (ImportError, OSError, RuntimeError, ValueError):
-            if self._plotter is not None:
-                self._plotter.close()
-            self.deleteLater()
-            raise
         self.legend = FigureCanvasQTAgg(Figure(facecolor="white"))
         self.legend.setFixedWidth(125)
         canvas_row.addWidget(self.legend)
@@ -127,7 +113,27 @@ class ScalpSurfaceDialog(QDialog):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.map_combo.currentIndexChanged.connect(self._load_panel)
-        self._load_panel()
+        try:
+            self._load_panel()
+            # Finish the initial CPU interpolation while Qt probes the display
+            # and opens VTK. Results wait for both steps to finish.
+            require_desktop_opengl(self)
+            from pyvistaqt import QtInteractor
+
+            self._plotter = QtInteractor(self, auto_update=False)
+            self._plotter.setObjectName("scalp3dInteractor")
+            self._plotter.enable_trackball_style()
+            self._plotter.set_background("white")
+            self._plotter.enable_parallel_projection()
+            canvas_row.insertWidget(0, self._plotter, 1)
+        except Exception:  # Construction failure must close native resources and prevent queued scene delivery.
+            self._closed = True
+            if self._plotter is not None:
+                self._plotter.close()
+            self.deleteLater()
+            raise
+        finally:
+            self._graphics_ready.set()
 
     @property
     def current_panel(self):
@@ -145,10 +151,17 @@ class ScalpSurfaceDialog(QDialog):
         panel = self.current_panel
         self.status.setText("Preparing scalp surface…")
         self._ready = False
-        self._start_job(
-            lambda: build_scalp_surface_scene(panel.data, panel.info, cmap=panel.cmap, norm=panel.norm),
-            self._panel_ready,
-        )
+        graphics_ready = self._graphics_ready
+
+        def prepare():
+            try:
+                return build_scalp_surface_scene(panel.data, panel.info, cmap=panel.cmap, norm=panel.norm)
+            finally:
+                # Prepare the first field while Qt opens the native graphics
+                # context. Only deliver results once its widgets exist.
+                graphics_ready.wait()
+
+        self._start_job(prepare, self._panel_ready)
 
     @Slot(object, object)
     def _panel_ready(self, scene, error):
@@ -187,27 +200,30 @@ class ScalpSurfaceDialog(QDialog):
         texture = pv.numpy_to_texture(np.ascontiguousarray(scene.texture_rgba[::-1]))
         texture.repeat = False
         texture.interpolate = False
-        plotter.add_mesh(pv.PolyData.from_regular_faces(scene.vertices, scene.faces), name="scalp", color="lightgray",
-                         smooth_shading=True, reset_camera=False, render=False)
+        plotter.add_mesh(pv.PolyData.from_regular_faces(scene.vertices, scene.faces), name="scalp", color="#e5e5e5",
+                         smooth_shading=True, ambient=0.55, diffuse=0.45, specular=0,
+                         reset_camera=False, render=False)
         plotter.add_mesh(surface, name="values", texture=texture, lighting=False, show_scalar_bar=False,
                          reset_camera=False, render=False)
         dots = scene.sensor_locations - scene.origin
         locations = scene.sensor_locations + 0.00045 * dots / np.linalg.norm(dots, axis=1, keepdims=True)
-        self._electrodes = plotter.add_points(locations, name="electrodes", color="#252525", point_size=7,
+        self._electrodes = plotter.add_points(locations, name="electrodes", color="#171717", point_size=6,
                                               render_points_as_spheres=True, lighting=False,
                                               reset_camera=False, render=False)
         if not self._camera_initialized:
             self._focal = (scene.vertices.min(axis=0) + scene.vertices.max(axis=0)) / 2
             self.reset_camera()
             self._camera_initialized = True
-        plotter.render()
+        else:
+            plotter.render()
 
     @Slot()
     def reset_camera(self):
         view = self.camera_combo.currentText()
-        vectors = {"Front": (0, 1, 0.4), "Back": (0, -1, 0.4),
-                   "Left": (-1, 0, 0.1), "Right": (1, 0, 0.1), "Top": (0, 0, 1)}
-        offset = np.asarray(vectors[view])
+        if view in ("Front", "Back"):
+            offset = _camera(view.lower())[2]
+        else:
+            offset = np.array({"Left": (-1, 0, 0.1), "Right": (1, 0, 0.1), "Top": (0, 0, 1)}[view])
         camera = self._plotter.camera
         camera.position = self._focal + 0.55 * offset / np.linalg.norm(offset)
         camera.focal_point = self._focal
@@ -244,6 +260,12 @@ class ScalpSurfaceDialog(QDialog):
         if not self._ready or self._job is not None:
             return
         panel = self.current_panel
+        cancel = self._cancel
+
+        def check_cancel():
+            if cancel.is_set():
+                raise PublicationMapGenerationCancelled("Export cancelled.")
+
         try:
             width = max(1, self._plotter.window_size[0])
             scale = max(1, math.ceil(VIEW_IMAGE_WIDTH_IN * FIGURE_EXPORT_DPI / width))
@@ -254,19 +276,18 @@ class ScalpSurfaceDialog(QDialog):
                 image = self._plotter.screenshot(return_img=True, scale=scale)
             finally:
                 self._electrodes.prop.point_size = original_size
-                self._plotter.render()
         except Exception as exc:
             logger.warning("scalp_camera_capture_failed", exc_info=True)
             self.status.setText(f"Could not capture this view. {exc}")
-            return
-        self.status.setText("Exporting PNG and PDF…")
-        cancel = self._cancel
-
-        def check_cancel():
-            if cancel.is_set():
-                raise PublicationMapGenerationCancelled("Export cancelled.")
-
-        self._start_job(lambda: export_camera_view(image, panel, filename, check_cancel), self._export_finished)
+        else:
+            self.status.setText("Exporting PNG and PDF…")
+            self._start_job(lambda: export_camera_view(image, panel, filename, check_cancel), self._export_finished)
+        finally:
+            # Restore the on-screen dots while the worker encodes the captured image.
+            try:
+                self._plotter.render()
+            except (OSError, RuntimeError, ValueError):
+                logger.warning("scalp_viewport_redraw_failed", exc_info=True)
 
     @Slot(object, object)
     def _export_finished(self, paths, error):

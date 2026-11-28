@@ -15,6 +15,7 @@ from Tools.Publication_Maps.models import (
     PublicationMapResult,
     PublicationMetric,
 )
+from Tools.Publication_Maps.scalp_io import require_compatible_geometry
 from Tools.Publication_Maps.session_panels import (
     SessionMapPanelSet,
     build_repeated_session_map_panels,
@@ -222,6 +223,7 @@ def build_session_panel_sets(
         raise PublicationMapInputError(
             "Session grids require two completed canonical group results."
         )
+    geometry = require_compatible_geometry(result.geometry for result in normalized_results)
     harmonic_sets = {
         tuple(result.selected_harmonics_hz) for result in normalized_results
     }
@@ -286,6 +288,7 @@ def build_session_panel_sets(
             panel_sets.append(
                 build_repeated_session_map_panels(
                     long_values=long_values,
+                    geometry=geometry,
                     workbook_records=records,
                     condition=condition,
                     metric=metric,

@@ -11,6 +11,7 @@ from Main_App.exports.figure_style import FIGURE_EXPORT_DPI
 
 if TYPE_CHECKING:
     import pandas as pd
+    from Tools.Publication_Maps.display_montage import DisplayMontage
 
 
 DEFAULT_BCA_LOW_COLOR = "#2166ac"
@@ -62,8 +63,8 @@ class ColorBounds:
     auto_scale: bool = True
     vmin: float | None = None
     vmax: float | None = None
-    low_color: str = DEFAULT_BCA_LOW_COLOR
-    high_color: str = DEFAULT_BCA_HIGH_COLOR
+    low_color: str | None = None
+    high_color: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,11 +92,12 @@ class PublicationMapRequest:
     export_session_grid_figure: bool = False
     session_comparison_ids: tuple[str, ...] = ()
     export_paired_session_difference: bool = False
-    scalp_view: Literal["2d", "3d"] = "2d"
+    scalp_view: Literal["2d", "3d", "3d_2d"] = "2d"
+    display_montage: DisplayMontage | str | Path | None = None
 
     def __post_init__(self) -> None:
-        if self.scalp_view not in ("2d", "3d"):
-            raise ValueError(f"Unknown scalp map view: {self.scalp_view!r}. Choose '2d' or '3d'.")
+        if self.scalp_view not in ("2d", "3d", "3d_2d"):
+            raise ValueError(f"Unknown scalp map view: {self.scalp_view!r}. Choose '2d', '3d' or '3d_2d'.")
 
 
 @dataclass(frozen=True)
@@ -152,6 +154,20 @@ class WorkbookEntry:
         return self.subject_id
 
 
+@dataclass(frozen=True, slots=True)
+class ScalpMapGeometry:
+    """Released head-frame positions in metres, keyed by the contributing recording."""
+
+    hardware_platform: str
+    montage_id: str
+    mapping_profile: str
+    coordinate_source: str
+    canonical_names: tuple[str, ...]
+    channel_names: tuple[str, ...]
+    reference_channels: tuple[str, ...]
+    source_positions: tuple[tuple[str, tuple[tuple[float, float, float], ...]], ...]
+
+
 @dataclass(frozen=True)
 class ExcludedCohortEntry:
     """Canonical participant/workbook excluded from one map request."""
@@ -181,6 +197,7 @@ class PublicationMapResult:
     included_workbooks: tuple[WorkbookEntry, ...] = ()
     excluded_cohort: tuple[ExcludedCohortEntry, ...] = ()
     qc_provenance: dict[str, object] = field(default_factory=dict)
+    geometry: ScalpMapGeometry | None = None
 
 
 class PublicationMapError(RuntimeError):

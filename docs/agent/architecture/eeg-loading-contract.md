@@ -248,8 +248,10 @@ resolved. Recording order is preserved. Verify the physical cap and wiring
 before selecting a template. Declare auxiliary channels by role. External
 EEG channels selected for initial reference and removal stay coordinate-free.
 Templates carry explicit project-template provenance through processing and
-cache reuse. The existing calibrated QC and spatial-tool eligibility rules
-continue to apply.
+cache reuse. Scalp Maps can display released electrode-space values on these
+layouts and on recorded or explicitly supplied display coordinates.
+[Scalp-map electrode geometry](statistics-tools.md#scalp-map-electrode-geometry) describes
+comparison and fallback behavior. Fixed-model methods retain their own gates.
 
 For a visible desktop check, select each cap in its project hardware settings,
 save, then reopen Settings and Guided setup to confirm the saved selection.

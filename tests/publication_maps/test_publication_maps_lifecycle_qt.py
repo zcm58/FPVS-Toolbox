@@ -214,6 +214,53 @@ def test_all_groups_builds_separate_canonical_requests(
 
 
 @pytest.mark.qt
+def test_color_swatches_follow_export_view_and_keep_custom_endpoint(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtGui import QColor
+    from Tools.Publication_Maps.colormaps import scalp_color_endpoints
+
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    assert scalp_color_endpoints("2d")[0] in page.color_low_btn.styleSheet()
+    low, high = scalp_color_endpoints("3d")
+    for view in ("3d", "3d_2d"):
+        page.scalp_view_combo.setCurrentIndex(page.scalp_view_combo.findData(view))
+        assert low in page.color_low_btn.styleSheet()
+        assert high in page.color_high_btn.styleSheet()
+        assert all(request.scalp_view == view for request in page._collect_requests())
+    chosen = "#123456"
+
+    def choose_color(initial, parent):
+        assert parent is page and initial.name() == low
+        return QColor(chosen)
+
+    monkeypatch.setattr(publication_maps_gui.QColorDialog, "getColor", choose_color)
+    page.color_low_btn.click()
+    page.scalp_view_combo.setCurrentIndex(page.scalp_view_combo.findData("2d"))
+    assert chosen in page.color_low_btn.styleSheet()
+    assert scalp_color_endpoints("2d")[1] in page.color_high_btn.styleSheet()
+    preview, *_ = page._collect_requests(preview_only=True)
+    assert preview.scalp_view == "3d"
+    assert all(b.low_color == chosen and b.high_color is None for b in preview.color_bounds.values())
+
+
+@pytest.mark.qt
+def test_display_montage_selection_reaches_preview_and_export_and_resets_with_project(qtbot, monkeypatch, tmp_path):
+    _host, page = _build_page(qtbot, monkeypatch, tmp_path)
+    assert page.montage_combo.currentData() is None
+    page.montage_combo.setCurrentIndex(page.montage_combo.findData("GSN-HydroCel-128"))
+    assert page._collect_requests()[0].display_montage == "GSN-HydroCel-128"
+    file = tmp_path / "Custom cap.tsv"
+    monkeypatch.setattr(publication_maps_gui.QFileDialog, "getOpenFileName", lambda *args: (str(file), ""))
+    page.montage_file_btn.click()
+    assert page._collect_requests(preview_only=True)[0].display_montage == file
+    monkeypatch.setattr(publication_maps_gui.QFileDialog, "getOpenFileName", lambda *args: ("", ""))
+    page.montage_file_btn.click()
+    assert page._collect_requests()[0].display_montage == file
+    page._on_input_root_changed("")
+    assert page.montage_combo.currentData() is None
+    assert page.montage_combo.findText(file.name) < 0
+
+
+@pytest.mark.qt
 def test_single_condition_two_group_comparison_builds_explicit_batch_requests(
     qtbot,
     monkeypatch,
