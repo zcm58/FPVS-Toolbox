@@ -1,5 +1,52 @@
 # EEG Loading and BIDS Import Contract
 
+## ANT eego wired TTL marker verification
+
+Use the source diagnostic for **one eego Recorder recording and one Studio
+condition run**. From the Toolbox checkout, use the Python environment with the
+pinned requirements installed. Keep the original `.cnt` and any same-basename
+`.evt`, `.seg` and `.trg` companions together. Selecting a CNT by extension
+alone is ambiguous. This route requires the native ANT container and reads it
+through `antio`/libeep, the backend used by MNE's ANT-specific reader.
+
+```powershell
+$env:PYTHONPATH = 'src'
+.\.venv\Scripts\python.exe -m Main_App.io.verify_ant_ttl 'C:/study/faces.cnt'
+.\.venv\Scripts\python.exe -m Main_App.io.verify_ant_ttl 'C:/study/faces.cnt' --studio-run 'C:/study/studio-run'
+```
+
+The first command lists each source event with its original code, annotation
+fields, integer sample, duration and native reader order. The event table is the
+one libeep resolves from the recording and its available companions. Keep legacy
+`.trg` rows in chronological order. Ties retain their file order. The second
+command compares the stimulus bytes with the per-run `runspec.json` and
+`trigger_log.csv`.
+Enable detailed run folders in Studio before recording. Bare decimal words
+1–255 identify stimulus candidates. Recognized recorder annotations, including
+impedance checks, stay in the report. Unclassified events prevent an ordered
+match. Repetitions and events on the same sample remain distinct. When Studio's
+`runtime_metadata.json` is present, the comparison also checks the effective
+output and configured Recorder rate against the CNT sample grid.
+
+The saved regression example in `tests/fixtures/ant_cnt/studio_playback/`
+pairs unedited run files from Studio's simulated 60 Hz playback with an RF64 CNT
+written by libeep 3.3.179 from the simulated parallel-port transitions. Use
+`studio-native.cnt` as the input and that same directory as `--studio-run`.
+
+The reader rejects unrecognized companion headers. libeep can omit EVT entries
+outside the recording and can fall back to another event source if no in-range
+EVT entries remain. Compare the displayed Recorder events with the saved report
+when qualifying a physical setup.
+
+Exit status 0 means inspection succeeded or the ordered words match. Status 1
+means a mismatch, and 2 indicates invalid input. For a match,
+`cnt_minus_studio_elapsed_ms` measures the difference between elapsed time on
+the recording and Studio clocks after aligning the first marker. Acquisition gaps
+can interrupt that comparison. A photodiode
+captured on the recording clock is required to measure physical display latency.
+The marker diagnostic leaves source files intact and does not register CNT as
+a processing input. [Studio implementation and verification](https://github.com/zcm58/FPVS-Studio-2.0/blob/codex/ant-mylab-ttl/docs/exec-plans/active/ant-mylab-ttl.md) · [MNE ANT reader](https://mne.tools/1.9/generated/mne.io.read_raw_ant.html)
+
 ## EGI DIN marker verification
 
 Use the read-only source diagnostic for a continuous Net Station MFF and one

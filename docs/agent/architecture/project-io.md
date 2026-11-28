@@ -323,6 +323,8 @@ transport-neutral identity check is separate from the Unicorn code-order adapter
 
 For a Studio EGI DIN run, compare the per-run schedule and trigger log with the
 selected Net Station MFF event track using the [read-only marker diagnostic](eeg-loading-contract.md#egi-din-marker-verification).
+For an ANT eego mylab TTL run, select the original eego Recorder CNT and keep
+its event companions together. [ANT marker verification](eeg-loading-contract.md#ant-eego-wired-ttl-marker-verification)
 
 Studio's requested base/oddball rates are the initial Toolbox protocol and FFT
 targets. The source display settings are retained separately. A configured

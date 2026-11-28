@@ -1,4 +1,5 @@
 altgraph==0.17.5
+antio==0.7.1
 certifi==2026.10.19
 charset-normalizer==3.4.2
 colorama==0.4.6

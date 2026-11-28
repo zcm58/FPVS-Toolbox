@@ -1,0 +1,4 @@
+trigger_index,frame_index,time_s,code,label,backend_name,status,message
+0,0,0.016666666666666607,1,condition_start,ant_mylab_ttl,sent,
+1,40,0.6833333333333309,55,oddball_onset,ant_mylab_ttl,sent,
+2,90,1.5166666666666613,55,oddball_onset,ant_mylab_ttl,sent,

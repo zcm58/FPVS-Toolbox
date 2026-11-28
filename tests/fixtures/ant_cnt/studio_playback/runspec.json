@@ -1,0 +1,206 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "ant-mylab",
+  "project_id": "sample-project",
+  "project_name": "Sample Project",
+  "template_id": "fpvs_6hz_every5_v1",
+  "random_seed": 0,
+  "condition": {
+    "condition_id": "faces",
+    "name": "Faces",
+    "show_title_on_screen": false,
+    "template_id": "fpvs_6hz_every5_v1",
+    "base_hz": 6.0,
+    "oddball_every_n": 5,
+    "oddball_hz": 1.2,
+    "total_oddball_cycles": 2,
+    "total_stimuli": 10,
+    "stimulus_modality": "image",
+    "trigger_code": 1
+  },
+  "display": {
+    "refresh_hz": 60.0,
+    "background_color": "#000000",
+    "stimulus_width_degrees": 5.0,
+    "viewing_distance_cm": 80.0,
+    "screen_width_cm": 52.0,
+    "screen_width_px": 1920,
+    "screen_height_px": 1080,
+    "use_current_screen_resolution": false,
+    "duty_cycle_mode": "continuous",
+    "frames_per_stimulus": 10,
+    "on_frames": 10,
+    "off_frames": 0,
+    "duty_cycle": 1.0,
+    "total_frames": 100
+  },
+  "fixation": {
+    "show_cross": true,
+    "accuracy_task_enabled": false,
+    "participant_tutorial_enabled": false,
+    "default_color": "#0000FF",
+    "target_color": "#FF0000",
+    "response_key": "space",
+    "response_window_frames": 60,
+    "response_keys": [],
+    "cross_size_px": 27,
+    "line_width_px": 2,
+    "target_duration_frames": 15,
+    "realized_target_count": 0
+  },
+  "presentation": {
+    "base": {
+      "transform": "none",
+      "image_geometry": {
+        "mode": "natural_aspect",
+        "width_degrees": 5.0,
+        "source_resolution": {
+          "width_px": 256,
+          "height_px": 256
+        }
+      }
+    },
+    "oddball": {
+      "transform": "none",
+      "image_geometry": {
+        "mode": "natural_aspect",
+        "width_degrees": 5.0,
+        "source_resolution": {
+          "width_px": 256,
+          "height_px": 256
+        }
+      }
+    }
+  },
+  "pre_stream_fixation_frames": 120,
+  "stimulus_sequence": [
+    {
+      "sequence_index": 0,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0003",
+      "image_path": "stimuli/original-images/base-set/base-set-03.png",
+      "on_start_frame": 0,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 1,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0002",
+      "image_path": "stimuli/original-images/base-set/base-set-02.png",
+      "on_start_frame": 10,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 2,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0001",
+      "image_path": "stimuli/original-images/base-set/base-set-01.png",
+      "on_start_frame": 20,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 3,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0003",
+      "image_path": "stimuli/original-images/base-set/base-set-03.png",
+      "on_start_frame": 30,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 4,
+      "role": "oddball",
+      "stimulus_modality": "image",
+      "stimulus_id": "oddball-set-original-0002",
+      "image_path": "stimuli/original-images/oddball-set/oddball-set-02.png",
+      "on_start_frame": 40,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 5,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0001",
+      "image_path": "stimuli/original-images/base-set/base-set-01.png",
+      "on_start_frame": 50,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 6,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0002",
+      "image_path": "stimuli/original-images/base-set/base-set-02.png",
+      "on_start_frame": 60,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 7,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0001",
+      "image_path": "stimuli/original-images/base-set/base-set-01.png",
+      "on_start_frame": 70,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 8,
+      "role": "base",
+      "stimulus_modality": "image",
+      "stimulus_id": "base-set-original-0002",
+      "image_path": "stimuli/original-images/base-set/base-set-02.png",
+      "on_start_frame": 80,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    },
+    {
+      "sequence_index": 9,
+      "role": "oddball",
+      "stimulus_modality": "image",
+      "stimulus_id": "oddball-set-original-0001",
+      "image_path": "stimuli/original-images/oddball-set/oddball-set-01.png",
+      "on_start_frame": 90,
+      "on_frames": 10,
+      "off_frames": 0,
+      "is_blank": false
+    }
+  ],
+  "fixation_events": [],
+  "trigger_events": [
+    {
+      "frame_index": 0,
+      "code": 1,
+      "label": "condition_start"
+    },
+    {
+      "frame_index": 40,
+      "code": 55,
+      "label": "oddball_onset"
+    },
+    {
+      "frame_index": 90,
+      "code": 55,
+      "label": "oddball_onset"
+    }
+  ]
+}

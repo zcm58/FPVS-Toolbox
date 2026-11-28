@@ -193,18 +193,23 @@ def test_active_three_retains_its_serial_transport(handoff):
 
 
 @pytest.mark.parametrize("source", ["setup", "completed", "completed_snapshot_only"])
-def test_egi_handoff_directs_operator_to_marker_inspection_before_project_creation(handoff, tmp_path, source):
+@pytest.mark.parametrize(("backend", "settings", "diagnostic"), [
+    ("egi_din", {"egi_parallel_address": 0x378, "egi_pulse_width_ms": 10}, "verify_egi_din"),
+    ("ant_mylab_ttl", {"ant_parallel_address": 0x378, "ant_pulse_width_ms": 8, "ant_sampling_rate_hz": 512},
+     "verify_ant_ttl"),
+])
+def test_wired_handoff_directs_operator_to_marker_inspection_before_project_creation(
+    handoff, tmp_path, source, backend, settings, diagnostic,
+):
     if source != "completed_snapshot_only":
-        handoff["recording"] = {
-            "recording_backend": "egi_din", "egi_parallel_address": 0x378, "egi_pulse_width_ms": 10,
-        }
+        handoff["recording"] = {"recording_backend": backend, **settings}
     if source != "setup":
         snapshot = _completion(handoff)["acquisition_evidence"]["recording"]
-        snapshot.update(selected_backend="egi_din", effective_backend="egi_din")
+        snapshot.update(selected_backend=backend, effective_backend=backend)
     path = tmp_path / "session.fpvsconfig"
     path.write_text(json.dumps(handoff), encoding="utf-8")
     projects = tmp_path / "projects"
-    with pytest.raises(FPVSConfigImportError, match=r"Main_App\.io\.verify_egi_din --help"):
+    with pytest.raises(FPVSConfigImportError, match=rf"Main_App\.io\.{diagnostic} --help"):
         create_project_from_fpvs_config(projects, path)
     assert not projects.exists()
 

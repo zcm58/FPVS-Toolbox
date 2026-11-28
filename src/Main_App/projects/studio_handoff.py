@@ -66,6 +66,7 @@ _RECORDING_FIELDS = frozenset({
     "recording_backend", "unicorn_udp_port", "brainproducts_serial_port", "brainproducts_parallel_address",
     "brainproducts_pulse_width_ms", "brainproducts_amplifier", "brainproducts_sampling_rate_hz",
     "egi_parallel_address", "egi_pulse_width_ms",
+    "ant_parallel_address", "ant_pulse_width_ms", "ant_sampling_rate_hz",
     "acquisition_profile", "electrode_montage",
 })
 STUDIO_RECORDER_PLATFORMS = {
@@ -549,6 +550,11 @@ def _validate_acquisition_identity(
 
 def _recording_backend(value: Any, field: str) -> str:
     backend = _text(value, field)
+    if backend == "ant_mylab_ttl":
+        raise ValueError(
+            "To verify ANT wired TTL markers, open the original eego .cnt with the source diagnostic. "
+            "Run python -m Main_App.io.verify_ant_ttl --help in the Toolbox source environment."
+        )
     if backend == "egi_din":
         raise ValueError(
             "EGI wired DIN supports marker verification only. To inspect the saved Net Station .mff, "

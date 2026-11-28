@@ -140,6 +140,8 @@ tests = [
   "tests/project_io/test_bdf_format.py",
   "tests/project_io/test_recording_inspection.py",
   "tests/project_io/test_egi_mff_events.py",
+  "tests/project_io/test_ant_cnt_events.py",
+  "tests/project_io/test_verify_ant_ttl.py",
   "tests/project_io/test_verify_egi_din.py",
   "tests/project_io/test_unicorn_units.py",
   "tests/project_io/test_unicorn_raw.py",
