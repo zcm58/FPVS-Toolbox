@@ -23,6 +23,7 @@ from Main_App.io.brain_products_files import (
     HEADER_EXTENSIONS,
     read_brainvision_header,
     source_files,
+    validate_brainvision_marker_extent,
 )
 
 
@@ -176,7 +177,7 @@ def read_brain_products_raw(
     overwrites source or existing files. Use ``open_brain_products_recording``
     when the caller needs deterministic memory-map closure.
     """
-    files = source_files(path, native_paths=True)
+    files = source_files(path, native_paths=True, verify_extent=True)
     if not isinstance(preload, (bool, str)):
         raise TypeError("preload must be False, True, or a new memory-map filename.")
     if isinstance(preload, str):
@@ -190,6 +191,10 @@ def read_brain_products_raw(
         reader_preload = False if synthesize_status else preload
         if path.suffix.lower() == ".vhdr":
             raw = mne.io.read_raw_brainvision(path, preload=reader_preload, verbose=False)
+            # MNE indexes text rows for ASCII BVCDF. Reuse that sample count
+            # to check marker bounds without scanning the signal file again.
+            if raw._raw_extras[0]["offsets"] is not None:
+                validate_brainvision_marker_extent(read_brainvision_header(files[2]), raw.n_times)
         else:
             raw = RawBVRF(path, preload=reader_preload)
         validate_electrical_channel_units(raw)

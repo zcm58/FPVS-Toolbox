@@ -16,11 +16,11 @@ from typing import Any
 from uuid import UUID
 
 from Main_App.io.file_filters import is_eeg_recording_file
-from Main_App.io.recording_sources import companion_identity, recording_content_identity, source_hashes_by_file
+from Main_App.io.recording_sources import bdf_change_identity, companion_identity, recording_content_identity, source_hashes_by_file
 from Main_App.projects.raw_identity import infer_raw_participant_id
 from Main_App.projects.studio_archive import archive_reviewed_result, studio_evidence_path
 from Main_App.projects.studio_handoff import (
-    STUDIO_RECORDER_PLATFORMS, StudioRecordingSelection, studio_recording_selection,
+    STUDIO_MARKER_DIAGNOSTICS, STUDIO_RECORDER_PLATFORMS, StudioRecordingSelection, studio_recording_selection,
 )
 
 FORMAT = "fpvs-study-handoff"
@@ -84,7 +84,9 @@ def validate_study_handoff(source: Mapping[str, Any]) -> tuple[dict, dict]:
                 raise FPVSConfigImportError("Completed visit lacks the evidence needed for a recording match.")
             runs = visit["runs"]
             setup_conditions = {c["condition_id"]: c["name"] for c in setups[visit["setup_id"]]["conditions"]}
-            if (not runs or any(not isinstance(run, dict) or run.get("state") != "completed" or not run.get("run_id")
+            if (not runs or any(not isinstance(run, dict) or run.get("state") != "completed"
+                                or not isinstance(run.get("run_id"), str) or not run["run_id"].strip()
+                                or run.get("condition_id") not in setup_conditions
                                 or setup_conditions.get(run.get("condition_id")) != run.get("condition_name") for run in runs)
                     or len({run["run_id"] for run in runs}) != len(runs)):
                 raise FPVSConfigImportError("Completed visit lacks a consistent recorded condition order.")
@@ -92,6 +94,10 @@ def validate_study_handoff(source: Mapping[str, Any]) -> tuple[dict, dict]:
     if any(not isinstance(s, dict) or digest(s) != key or s.get("project", {}).get("project_id") != source.get("project_id")
            for key, s in setups.items()):
         raise FPVSConfigImportError("A captured study setup has a conflicting fingerprint or project.")
+    recorded = {(visit.get("recording") or {}).get("selected_backend") for visit in visits
+                if visit["state"] == "completed" and not visit["issues"]}
+    if recorded and recorded.issubset(STUDIO_MARKER_DIAGNOSTICS):
+        raise FPVSConfigImportError(" ".join(STUDIO_MARKER_DIAGNOSTICS[backend] for backend in sorted(recorded)))
     scope = source.get("website_study")
     if scope is not None:
         fields = {"project_id", "experiment_id", "experiment_version", "protocol_sha256"}
@@ -181,6 +187,8 @@ class StudyReview:
     baseline: str | None
     prior: dict
     unreadable: dict[str, str] = field(default_factory=dict)
+    source_sha256: str = ""
+    existing_root: Path | None = None
 
 
 def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None) -> tuple[dict[str, dict], dict[str, str]]:
@@ -206,6 +214,8 @@ def _recording_inventory(folder: Path, *, hash_names: set[str] | None = None) ->
             else:
                 stat = path.stat()
                 identity = [stat.st_size, stat.st_mtime_ns]
+                if hash_names is None or name in hash_names:
+                    components["bdf_change_identity"] = bdf_change_identity(path, stat)
         except (OSError, ValueError) as exc:
             unreadable[name] = str(exc)
             continue
@@ -218,9 +228,15 @@ def _same_reviewed_recording(visit: Mapping, files: Mapping) -> bool:
     return current is not None and all(visit.get(k) == v for k, v in current.items())
 
 
-def _retained_recording_needs_review(visit: Mapping, files: Mapping) -> bool:
-    return (visit.get("decision") == "matched" and Path(visit["raw_file"]).suffix.lower() in {".vhdr", ".bvrh"}
-            and not _same_reviewed_recording(visit, files))
+def _retained_recording_needs_review(visit: Mapping, files: Mapping, same_folder: bool) -> bool:
+    return visit.get("decision") == "matched" and (not same_folder or not _same_reviewed_recording(visit, files))
+
+
+def _compatible_recording(name: str, platform: str | None) -> bool:
+    suffix = Path(name).suffix.casefold()
+    return suffix in {".vhdr", ".bvrh"} if platform == "brain_products" else (
+        platform in {"biosemi", "biosemi_active_three", "unicorn"} and suffix == ".bdf"
+    )
 
 
 def review_study(imported, folder: Path, existing=None, *, hardware: str | None = None) -> StudyReview:
@@ -250,32 +266,34 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
     visits = source["visits"]
     counts = Counter(_pid(v["participant_number"]) for v in visits)
     prior_visits = previous.get("visits", {})
+    same_folder = bool(previous) and Path(previous["raw_folder"]) == folder
     prior_people = {v["participant_number"] for v in prior_visits.values()}
     rows = []
     for visit in visits:
         key = visit["visit_id"]
         prior = prior_visits.get(key, {})
         pid = _pid(visit["participant_number"])
-        candidates = tuple(by_pid.get(pid, ()))
+        platform = _hardware(visit)
+        candidates = tuple(name for name in by_pid.get(pid, ()) if _compatible_recording(name, platform))
         change = "new" if not prior else "unchanged" if digest(visit) == prior["evidence_sha256"] else "changed"
         if change == "new" and previous:
             change = "additional visit" if visit["participant_number"] in prior_people else "new participant"
         reason = ""
         if not visit.get("setup_id") or not visit.get("participant_session_number") or visit["state"] != "completed" or visit["issues"]:
             reason = "Incomplete or unverified as-run evidence"
-        elif hardware and _hardware(visit) != hardware:
-            reason = f"Recorded hardware {_hardware(visit) or 'unknown'} differs from project hardware {hardware}"
         elif not re.fullmatch("[A-Za-z0-9][A-Za-z0-9_-]*", visit["participant_number"]):
             reason = "Unsupported participant identifier"
         else:
             try:
                 _method(source["setups"][visit["setup_id"]])
                 selection = _visit_selection(source, visit)
-                if selection and existing and not selection.matches(existing.preprocessing):
+                if hardware and platform != hardware:
+                    reason = f"Recorded hardware {platform or 'unknown'} differs from project hardware {hardware}"
+                elif selection and existing and not selection.matches(existing.preprocessing):
                     reason = f"Studio montage {selection.label} conflicts with the current project recording settings."
             except ValueError as exc:
                 reason = str(exc)
-        stable_match = _same_reviewed_recording(prior, files)
+        stable_match = same_folder and _same_reviewed_recording(prior, files)
         if change == "unchanged" and ((stable_match and not reason) or prior.get("decision") in {"awaiting_eeg", "excluded"}):
             status = prior["decision"]
         elif reason:
@@ -289,12 +307,14 @@ def review_study(imported, folder: Path, existing=None, *, hardware: str | None 
         rows.append(ReviewRow(visit, prior, candidates, status, change, reason))
     ids = {row.visit["visit_id"] for row in rows}
     omitted = {key: row for key, row in prior_visits.items() if key not in ids and (
-        row.get("in_source_roster", True) or _retained_recording_needs_review(row, files))}
-    return StudyReview(tuple(rows), files, omitted, folder, baseline, previous, unreadable)
+        row.get("in_source_roster", True) or _retained_recording_needs_review(row, files, same_folder))}
+    return StudyReview(tuple(rows), files, omitted, folder, baseline, previous, unreadable,
+                       imported.source_sha256, existing.project_root if existing is not None else None)
 
 
 def _hardware(visit):
-    return STUDIO_RECORDER_PLATFORMS.get((visit.get("recording") or {}).get("selected_backend"))
+    selected = (visit.get("recording") or {}).get("selected_backend")
+    return STUDIO_RECORDER_PLATFORMS.get(selected) if isinstance(selected, str) else None
 
 
 def find_study_project(projects_root: Path, study_id: str, *, warnings: list[str] | None = None):
@@ -370,10 +390,12 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
             setup = source["setups"][visit["setup_id"]]
             method = _visit_method(source, visit)
             entry["method_sha256"] = digest(method)
+            platform = _hardware(visit)
+            if not _compatible_recording(name, platform):
+                raise ValueError(f"Recording hardware for {key} conflicts with the EEG file format.")
             if version_key(visit) in versions:
-                platform = _hardware(visit)
-                if platform != hardware or (path.suffix.casefold() == ".bdf") != (platform != "brain_products"):
-                    raise ValueError(f"Recording hardware for {key} conflicts with the selected hardware or EEG file.")
+                if platform != hardware:
+                    raise ValueError(f"Recording hardware for {key} conflicts with the selected hardware.")
                 if signature is not None and method != signature:
                     raise ValueError("Selected versions have incompatible frequency, duration, marker or acquisition settings.")
                 signature = method
@@ -381,18 +403,17 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
                 selection = _visit_selection(source, visit)
         matches[key] = entry
     if selected_setup is None:
-        selections = set()
         for row in review.rows:
             if version_key(row.visit) in versions and not row.problem and row.visit.get("setup_id"):
-                selections.add(_visit_selection(source, row.visit))
+                if _hardware(row.visit) != hardware:
+                    raise ValueError("Selected visit hardware conflicts with the project recording system.")
+                method = _visit_method(source, row.visit)
                 if selected_setup is None:
-                    if _hardware(row.visit) != hardware:
-                        raise ValueError("Selected visit hardware conflicts with the project recording system.")
                     selected_setup = source["setups"][row.visit["setup_id"]]
                     selection = _visit_selection(source, row.visit)
-                    signature = _visit_method(source, row.visit)
-        if len(selections) > 1:
-            raise ValueError("The selected visits have incompatible electrode montages.")
+                    signature = method
+                elif method != signature:
+                    raise ValueError("Selected visits have incompatible frequency, duration, marker or acquisition settings.")
         if selected_setup is None:
             raise ValueError("The selected version has no supported as-run setup for this project.")
     for key, entry in review.prior.get("visits", {}).items():
@@ -403,7 +424,7 @@ def _reviewed_state(imported, review, decisions, omissions, versions, warnings, 
         prior["in_source_roster"] = False
         if decision == "archive":
             prior["decision"] = "archived"
-        elif _retained_recording_needs_review(prior, review.files):
+        elif _retained_recording_needs_review(prior, review.files, Path(review.prior["raw_folder"]) == review.folder):
             raise ValueError(f"The recording for omitted visit {key} differs from its approval. "
                              "Archive the previous membership or import a roster that includes the visit for review.")
         matches[key] = prior
@@ -440,6 +461,10 @@ def commit_study_review(projects_root, imported, review, *, decisions, omissions
     from Main_App.projects.fpvs_config_import import _create_imported_project, _unique_project_root
     from Main_App.projects.project import Project
 
+    if review.source_sha256 != imported.source_sha256 or review.existing_root != (
+        existing.project_root if existing is not None else None
+    ):
+        raise ValueError("This review belongs to a different Studio export or Toolbox project. Reopen the roster.")
     if hardware is None:
         if existing:
             hardware = existing.preprocessing["hardware_platform"]
@@ -488,7 +513,10 @@ def _register_reviewed_visits(manifest, current, state, folder, group_assignment
     participants = manifest.setdefault("participants", {})
     session_ids = {info["visit_index"]: key for key, info in sessions.items()}
     source_ids = {(info["group_id"], info["session_id"]): key for key, info in sources.items()}
-    previous_visits = (current.manifest.get("tools", {}).get(NAMESPACE) or {}).get("visits", {})
+    previous = current.manifest.get("tools", {}).get(NAMESPACE) or {}
+    previous_visits = previous.get("visits", {})
+    if previous and Path(previous["raw_folder"]) != folder:
+        _relocate_study_sources(current, manifest, folder, previous)
     for key, visit in state["visits"].items():
         index = visit["participant_session_number"]
         if index is None:
@@ -519,6 +547,26 @@ def _register_reviewed_visits(manifest, current, state, folder, group_assignment
         recording = recordings.setdefault(visit["recording_id"], {})
         recording.update(participant_id=pid, visit_index=index, session_id=session,
                          source_id=source, raw_file=str(folder / visit["raw_file"]))
+
+
+def _relocate_study_sources(current, manifest, folder, previous):
+    """Rebase cohort-owned registrations after the analyst chooses the moved EEG folder."""
+    old_folder = Path(previous["raw_folder"])
+    owned_ids = {visit["recording_id"] for visit in previous["visits"].values() if visit.get("recording_id")}
+    for source_id, source in current.recording_sources.items():
+        if not source.get("reviewed_files_only") or Path(source["raw_input_folder"]) != old_folder:
+            continue
+        members = {key: row for key, row in current.recordings.items() if row["source_id"] == source_id}
+        if members.keys() - owned_ids:
+            raise ValueError(f"Recording source {source_id} also contains registrations outside this Studio cohort. "
+                             "Review its source folder in the project before relocating the study.")
+        manifest["recording_sources"][source_id]["raw_input_folder"] = str(folder)
+        for key, row in members.items():
+            relative = Path(row["raw_file"]).relative_to(old_folder)
+            manifest["recordings"][key]["raw_file"] = str(folder / relative)
+        group = manifest["groups"][source["group_id"]]
+        if group.get("raw_input_folder") and Path(group["raw_input_folder"]) == old_folder:
+            group["raw_input_folder"] = str(folder)
 
 
 def _publish(root, imported, review, state, setup, hardware, group_assignments, selection):

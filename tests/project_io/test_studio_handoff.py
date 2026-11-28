@@ -251,6 +251,26 @@ def test_explicit_unicorn_selection_uses_factory_mapping_and_retains_native_poli
     assert studio_recording_selection(normalize_studio_handoff(handoff)) is None
 
 
+@pytest.mark.parametrize("include_recording_profile", [True, False])
+def test_unicorn_setup_rejects_conflicting_channels_in_toolbox_summary(tmp_path, include_recording_profile):
+    from pathlib import Path
+
+    source = Path(__file__).parents[1] / "fixtures/studio_handoff/v2-completed-unicorn.fpvsconfig"
+    setup = json.loads(source.read_bytes())
+    setup["kind"] = "setup"
+    del setup["completed_session"]
+    setup["recording"]["electrode_montage"] = "unicorn8"
+    if not include_recording_profile:
+        del setup["recording"]["acquisition_profile"]
+    mapping = setup["toolbox"]["acquisition_profile"]["source_to_canonical"]
+    mapping["EEG 1"], mapping["EEG 7"] = mapping["EEG 7"], mapping["EEG 1"]
+    file = tmp_path / "study.fpvsconfig"
+    file.write_text(json.dumps(setup), encoding="utf-8")
+    with pytest.raises(FPVSConfigImportError, match="channel mapping conflicts"):
+        create_project_from_fpvs_config(tmp_path / "projects", file)
+    assert not (tmp_path / "projects").exists()
+
+
 @pytest.mark.parametrize("backend,platform", [
     ("biosemi_active_three", "biosemi_active_three"),
     ("brainproducts_triggerbox", "brain_products"),

@@ -174,6 +174,28 @@ def _read_header(stream: BinaryIO) -> tuple[BdfHeader, bytes]:
     return _header(fixed, signal_bytes), fixed + signal_bytes
 
 
+def validate_bdf_record_extent(path: Path, file_size: int) -> None:
+    """Verify complete 24-bit records without imposing a montage or unit policy."""
+    with path.open("rb") as stream:
+        fixed = stream.read(256)
+        if len(fixed) != 256 or fixed[:8] != b"\xffBIOSEMI":
+            raise BdfFormatError("Missing or incomplete BDF header.")
+        channels = _integer(fixed[252:256], "signal count")
+        offset = _integer(fixed[184:192], "header length")
+        declared_records = _integer(fixed[236:244], "record count")
+        if not 1 <= channels <= 9999 or offset != 256 * (channels + 1) or file_size < offset:
+            raise BdfFormatError("Incomplete BDF signal header.")
+        # Packed samples-per-record fields follow 216 header bytes per signal.
+        stream.seek(256 + channels * 216)
+        sample_counts = stream.read(channels * 8)
+    samples = [_integer(sample_counts[i:i + 8], "samples per record") for i in range(0, len(sample_counts), 8)]
+    if len(samples) != channels or min(samples) <= 0:
+        raise BdfFormatError("Invalid BDF samples per record.")
+    records, remainder = divmod(file_size - offset, 3 * sum(samples))
+    if remainder or not records or declared_records not in (-1, records):
+        raise BdfFormatError("BDF record count/file size mismatch or truncated samples.")
+
+
 def _file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
     # Windows path stat and descriptor fstat expose different ctime semantics.
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns

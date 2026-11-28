@@ -309,6 +309,8 @@ can send serial markers. A raw file extension alone cannot establish a cap.
 
 Completed sessions use the recorder and cap captured at execution. An
 incompatible pair or disagreement with the exported setup requires review.
+Setup and summary acquisition profiles must agree, including the declared
+Unicorn channel map. Either can identify a conflict with the factory wiring.
 Historical files without a cap keep the manual hardware-selection workflow.
 Readers that strictly validate older field sets require an update to accept
 a declaration. [Built-in cap templates](eeg-loading-contract.md#built-in-cap-templates)
@@ -395,6 +397,14 @@ reopens the saved evidence without asking for the source file. The
 `visits[].recording` snapshot carries each visit's recorder and cap. A
 compatible common declaration can configure processing for the reviewed
 cohort. Changing an existing project's cap requires an explicit decision.
+Each completed run needs a condition ID and matching name from its captured
+setup. A contradictory recorder or effective transport requires review even
+when a legacy visit omits the montage. Recording proposals use the entry
+formats supported for that recorder. An all-deferred selection still needs a
+common method to seed the project.
+Cohorts with only EGI or ANT marker recordings direct the operator to the MFF
+or CNT diagnostic. In a mixed cohort, those visits can be deferred while the
+supported recordings continue through review.
 The `tools.studio_cohort` manifest namespace records the reviewed membership,
 version choice and older receipts. Canonical recording IDs identify
 processing inputs and downstream workbooks. Explicitly reviewed source
@@ -413,6 +423,16 @@ alone cannot establish that relationship. Keep the original roster and its
 receipts. Use the saved EEG location and reviewed recording identities to
 preview changes against the last accepted handoff and the last processed cohort.
 Carry forward a match or review only while its source evidence is still valid.
+BDF matches use the reviewed folder, filename, size, modification time,
+device, file ID and change metadata. Windows adds the native change time when
+the filesystem supplies it, since Python's Windows ctime records creation.
+Review and processing selection check file attributes without scanning the BDF signal. Older
+approvals without this identity need a fresh match. BIDS admission separately
+hashes the complete source when reading or reusing a dataset.
+If the EEG folder moves, reconfirm the files in the new folder. Toolbox
+relocates cohort-owned registrations and preserves their earlier receipts.
+An omitted visit whose file changed or disappeared must be archived or
+reintroduced for review before it can be included again.
 BrainVision approvals include file metadata and SHA-256 for the header,
 signal, marker and any impedance companion. Review fingerprints selectable
 recordings in the background worker. Commit rechecks the inventory and reads
@@ -433,7 +453,7 @@ its registration, review and prior results until the analyst explicitly
 resolves the discrepancy. Preserve the evidence behind any resulting decision.
 
 Accept the revision into that same project after confirmation. Revalidate the
-preview against the current project before saving the accepted roster, reviewed
+preview against the same source export and current project before saving the accepted roster, reviewed
 changes and result status together. An identical revision leaves registrations,
 reviews and result status intact. Cancellation or an identity conflict leaves
 the existing project untouched. Follow the

@@ -88,7 +88,46 @@ def _bvrf_companion(header: Path, suffix: str, root: Path, *, required: bool = T
     return None
 
 
-def source_files(path: str | Path, *, native_paths: bool = False) -> tuple[Path, ...]:
+def validate_brainvision_marker_extent(markers: configparser.ConfigParser, frames: int) -> None:
+    if not markers.has_section("Marker Infos"):
+        return
+    for key, value in markers.items("Marker Infos"):
+        if not key.startswith("mk") or not key[2:].isdigit():
+            continue
+        fields = value.split(",", 4)
+        if len(fields) < 4:
+            raise BrainProductsFormatError(f"Incomplete BrainVision marker {key}.")
+        # Recorder positions are one-based. Empty size denotes a point marker.
+        sample = int(fields[2])
+        length = int(fields[3] or 0)
+        if not 1 <= sample <= frames or length < 0 or sample - 1 + length > frames:
+            raise BrainProductsFormatError(f"BrainVision marker {key} extends outside the recording.")
+
+
+def _validate_bvcdf_extent(header: configparser.ConfigParser, data: Path,
+                           markers: configparser.ConfigParser, known_samples: int | None) -> None:
+    common = header["Common Infos"]
+    if common.get("DataFormat", "").upper() != "BINARY":
+        if known_samples is not None:
+            validate_brainvision_marker_extent(markers, known_samples)
+        return
+    # These are the binary encodings supported by the native MNE BVCDF reader.
+    widths = {"INT_16": 2, "INT_32": 4, "IEEE_FLOAT_32": 4}
+    width = widths.get(header.get("Binary Infos", "BinaryFormat", fallback="").upper())
+    if width is None:
+        return  # The native reader reports an unsupported format.
+    channels = common.getint("NumberOfChannels")
+    if not channels or channels <= 0:
+        raise BrainProductsFormatError("BrainVision needs a positive channel count.")
+    frames, remainder = divmod(data.stat().st_size, width * channels)
+    if (remainder or not frames or common.getint("DataPoints", fallback=frames) != frames
+            or known_samples is not None and known_samples != frames):
+        raise BrainProductsFormatError("BrainVision signal size does not match complete sample frames.")
+    validate_brainvision_marker_extent(markers, frames)
+
+
+def source_files(path: str | Path, *, native_paths: bool = False,
+                 verify_extent: bool = False, known_samples: int | None = None) -> tuple[Path, ...]:
     """Return existing header, data, markers, and optional impedance paths."""
     selected = Path(path)
     root = selected.parent.resolve(strict=True)
@@ -111,6 +150,8 @@ def source_files(path: str | Path, *, native_paths: bool = False) -> tuple[Path,
             raise BrainProductsFormatError("BrainVision marker file must name its DataFile.") from exc
         if marker_data != data:
             raise BrainProductsFormatError("BrainVision header and marker file name different data files.")
+        if verify_extent or known_samples is not None:
+            _validate_bvcdf_extent(parser, data, marker_header, known_samples)
         return header, data, markers
     if extension == ".bvrh":
         files = [header, _bvrf_companion(header, ".bvrd", root), _bvrf_companion(header, ".bvrm", root)]

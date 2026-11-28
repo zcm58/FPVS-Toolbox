@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
+import time
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -145,6 +147,190 @@ def test_mixed_recorders_still_require_manual_cohort_review(tmp_path):
     assert "differs from project hardware" in review.rows[1].problem
     with pytest.raises(ValueError, match="Select the project recording system"):
         commit_study_review(tmp_path / "projects", data, review, decisions={}, omissions={}, versions=[])
+
+
+@pytest.mark.parametrize("value", [{}, {"condition_id": "missing"}, {"condition_name": "Faces"}])
+def test_study_does_not_accept_incomplete_condition_identity(tmp_path, value):
+    source = make_source()
+    source["visits"][0]["runs"] = [dict(value, state="completed", run_id="run-1")]
+    with pytest.raises(ValueError, match="consistent recorded condition"):
+        write_source(tmp_path, source)
+
+
+@pytest.mark.parametrize(("selected", "effective", "problem"), [
+    ("serial", "null", "effective"),
+    ("biosemi_active_three", "unicorn_udp", "effective"),
+    ("brainproducts_triggerbox", "brainproducts_parallel", "effective"),
+    ("unicorn_udp", "unicorn_udp", "conflicts between"),  # captured setup declares BioSemi
+    ("egi_din", "egi_din", "verify_egi_din"),
+    ("ant_mylab_ttl", "ant_mylab_ttl", "verify_ant_ttl"),
+])
+def test_bad_study_snapshot_is_a_review_exception_before_registration(tmp_path, selected, effective, problem):
+    source = make_source()
+    source["visits"][0]["recording"].update(selected_backend=selected, effective_backend=effective)
+    data = write_source(tmp_path, source)
+    (tmp_path / "P001.bdf").write_bytes(b"review only")
+    review = review_study(data, tmp_path, hardware="biosemi")
+    assert review.rows[0].status == "exception" and problem in review.rows[0].problem
+    decisions = {row.visit["visit_id"]: ("awaiting_eeg", None) for row in review.rows}
+    decisions["exec-1"] = ("matched", "P001.bdf")
+    with pytest.raises(ValueError, match="compatible evidence"):
+        commit_study_review(tmp_path / "projects", data, review, decisions=decisions,
+                            omissions={}, versions=[source["visits"][0]["protocol_version_id"]], hardware="biosemi")
+    assert not (tmp_path / "projects").exists()
+
+
+def test_versioned_study_snapshot_requires_its_effective_output(tmp_path):
+    source = make_source()
+    source["visits"][0]["recording"]["schema_version"] = 1
+    imported = write_source(tmp_path, source)
+    review = review_study(imported, tmp_path)
+    assert review.rows[0].status == "exception" and "effective" in review.rows[0].problem
+    assert review.rows[1].status == "missing"  # older unversioned, sparse recording declaration
+
+
+@pytest.mark.parametrize("backends", [("egi_din",), ("ant_mylab_ttl",), ("egi_din", "ant_mylab_ttl")])
+def test_exclusively_marker_only_study_directs_to_the_source_diagnostics(tmp_path, backends):
+    source = make_source()
+    source["visits"] = source["visits"][:len(backends)]
+    for visit, backend in zip(source["visits"], backends, strict=True):
+        visit["recording"].update(selected_backend=backend, effective_backend=backend)
+    with pytest.raises(ValueError) as error:
+        write_source(tmp_path, source)
+    for backend in backends:
+        diagnostic = "verify_egi_din" if backend == "egi_din" else "verify_ant_ttl"
+        assert diagnostic in str(error.value)
+
+
+def test_recording_proposals_and_out_of_version_matches_respect_hardware_format(tmp_path):
+    source = make_source()
+    _set_brainvision_cap(source, 0, "brainproducts_acticap_gacs_64")
+    source["visits"][0]["protocol_version_id"] = str(uuid4())
+    imported = write_source(tmp_path, source)
+    for n in (1, 2):
+        (tmp_path / f"P{n:03}.bdf").write_bytes(b"review only")
+        _write_brainvision_recording(tmp_path / f"P{n:03}.vhdr")
+    review = review_study(imported, tmp_path)
+    assert [row.candidates for row in review.rows] == [("P001.vhdr",), ("P002.bdf",), ()]
+    assert [row.status for row in review.rows] == ["clear", "clear", "missing"]
+    with pytest.raises(ValueError, match="EEG file format"):
+        commit_study_review(tmp_path / "projects", imported, review, versions=[source["visits"][1]["protocol_version_id"]],
+                            hardware="biosemi", omissions={}, decisions={"exec-1": ("matched", "P001.bdf"),
+                            "exec-2": ("matched", "P002.bdf"), "exec-3": ("awaiting_eeg", None)})
+
+
+def test_study_with_all_eeg_deferred_cannot_seed_conflicting_scientific_methods(tmp_path):
+    source = make_source()
+    different = deepcopy(next(iter(source["setups"].values())))
+    different["conditions"][0]["oddball_cycle_repeats_per_sequence"] += 10
+    source["visits"][1]["setup_id"] = digest(different)
+    source["setups"][digest(different)] = different
+    imported = write_source(tmp_path, source)
+    review = review_study(imported, tmp_path)
+    with pytest.raises(ValueError, match="incompatible"):
+        commit_study_review(tmp_path / "projects", imported, review, hardware="biosemi", omissions={},
+                            decisions={r.visit["visit_id"]: ("awaiting_eeg", None) for r in review.rows},
+                            versions=[source["visits"][0]["protocol_version_id"]])
+    assert not (tmp_path / "projects").exists()
+
+
+def test_cannot_apply_review_to_another_export_or_unreviewed_project(tmp_path):
+    source = make_source()
+    imported = write_source(tmp_path, source)
+    review = review_study(imported, tmp_path)
+    options = dict(versions=[source["visits"][0]["protocol_version_id"]], hardware="biosemi", omissions={},
+                   decisions={r.visit["visit_id"]: ("awaiting_eeg", None) for r in review.rows})
+    root = tmp_path / "projects"
+    other = dict(source, study_id=str(uuid4()))
+    with pytest.raises(ValueError, match="different Studio export"):
+        commit_study_review(root, write_source(tmp_path, other), review, **options)
+    assert not root.exists()
+    project = commit_study_review(root, imported, review, **options)
+    before = (project.project_root / "project.json").read_bytes()
+    with pytest.raises(ValueError, match="different Studio export or Toolbox project"):
+        commit_study_review(root, imported, review, existing=project, **options)
+    assert (project.project_root / "project.json").read_bytes() == before
+
+
+def test_changed_omitted_bdf_and_relocated_raw_folder_require_fresh_matches(tmp_path):
+    from Main_App.processing.processing_controller import prepare_batch_files
+
+    source = make_source()
+    source["visits"] = source["visits"][:2]
+    folder = tmp_path / "original"
+    folder.mkdir()
+    root = tmp_path / "projects"
+    for n in (1, 2):
+        (folder / f"P{n:03}.bdf").write_bytes(bytes([n]))
+    imported = write_source(tmp_path, source)
+    decisions = {"exec-1": ("matched", "P001.bdf"), "exec-2": ("matched", "P002.bdf")}
+    options = dict(versions=[source["visits"][0]["protocol_version_id"]], hardware="biosemi")
+    project = commit_study_review(root, imported, review_study(imported, folder), decisions=decisions,
+                                  omissions={}, **options)
+    moved = folder.rename(tmp_path / "relocated")
+    review = review_study(imported, moved, project)
+    assert [r.status for r in review.rows] == ["reconfirm_recording"] * 2
+    project = commit_study_review(root, imported, review, existing=project, decisions=decisions, omissions={}, **options)
+    assert set(prepare_batch_files(project)) == {moved / "P001.bdf", moved / "P002.bdf"}
+    assert [r.status for r in review_study(imported, moved, project).rows] == ["matched"] * 2
+    source["visits"].pop()
+    source["roster_sequence"] += 1
+    changed = write_source(tmp_path, source)
+    (moved / "P002.bdf").write_bytes(b"replacement")
+    revised = review_study(changed, moved, project)
+    before = (project.project_root / "project.json").read_bytes()
+    del decisions["exec-2"]
+    with pytest.raises(ValueError, match="differs from its approval"):
+        commit_study_review(root, changed, revised, existing=project, decisions=decisions,
+                            omissions={"exec-2": "retain"}, **options)
+    assert (project.project_root / "project.json").read_bytes() == before
+    updated = commit_study_review(root, changed, revised, existing=project, decisions=decisions,
+                                  omissions={"exec-2": "archive"}, **options)
+    assert set(prepare_batch_files(updated)) == {moved / "P001.bdf"}
+
+
+def test_bdf_copy_with_preserved_size_and_mtime_invalidates_approval_and_stale_preview(tmp_path):
+    from Main_App.processing.processing_controller import prepare_batch_files, raw_file_info_for_path
+
+    source = make_source()
+    source["visits"] = source["visits"][:1]
+    imported = write_source(tmp_path, source)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    path = raw / "P001.bdf"
+    path.write_bytes(b"old")
+    stat = path.stat()
+    root = tmp_path / "projects"
+    options = dict(decisions={"exec-1": ("matched", path.name)}, hardware="biosemi", omissions={},
+                   versions=[source["visits"][0]["protocol_version_id"]])
+    project = commit_study_review(root, imported, review_study(imported, raw), **options)
+    manifest_path = project.project_root / "project.json"
+    approved_bytes = manifest_path.read_bytes()
+    reviewed = review_study(imported, raw, project)
+    assert reviewed.rows[0].status == "matched"
+    replacement = tmp_path / "new.bdf"
+    replacement.write_bytes(b"new")
+    os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    # Windows exposes ChangeTime at millisecond precision through pywin32.
+    time.sleep(0.02)
+    shutil.copy2(replacement, path)
+    assert (path.stat().st_size, path.stat().st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+    assert review_study(imported, raw, project).rows[0].status == "reconfirm_recording"
+    with pytest.raises(ValueError, match="Confirm the current BDF"):
+        raw_file_info_for_path(project, path)
+    with pytest.raises(ValueError, match="Confirm the current BDF"):
+        prepare_batch_files(project)
+    with pytest.raises(ValueError, match="changed after review"):
+        commit_study_review(root, imported, reviewed, existing=project, **options)
+    assert manifest_path.read_bytes() == approved_bytes
+    historical = json.loads(approved_bytes)
+    del historical["tools"]["studio_cohort"]["visits"]["exec-1"]["bdf_change_identity"]
+    manifest_path.write_text(json.dumps(historical), encoding="utf-8")
+    fresh = review_study(imported, raw, project)
+    assert fresh.rows[0].status == "reconfirm_recording"
+    project = commit_study_review(root, imported, fresh, existing=project, **options)
+    assert review_study(imported, raw, project).rows[0].status == "matched"
+    assert set(prepare_batch_files(project)) == {path}
 
 
 def test_retained_brainvision_visit_with_changed_bytes_can_be_archived(tmp_path):

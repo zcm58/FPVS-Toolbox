@@ -28,23 +28,8 @@ def main(argv: list[str] | None = None) -> int:
             candidates = tuple(event for event in inspection.events if event.kind != "recorder")
             comparison = compare_studio_markers(
                 candidates, args.studio_run, backend="ant_mylab_ttl", recording_format="cnt",
+                sampling_rate_hz=inspection.sampling_rate_hz,
             )
-            metadata_path = args.studio_run / "runtime_metadata.json"
-            if metadata_path.is_file():
-                snapshot = json.loads(metadata_path.read_text(encoding="utf-8-sig"))["recording"]
-                if snapshot["effective_backend"] != "ant_mylab_ttl":
-                    comparison["differences"].append("Studio runtime metadata identifies a different output.")
-                else:
-                    expected_rate = snapshot["ant_sampling_rate_hz"]
-                    if type(expected_rate) is not int or expected_rate <= 0:
-                        raise ValueError("Invalid ANT sampling rate in Studio runtime metadata.")
-                    comparison["studio_configured_rate_hz"] = expected_rate
-                    if expected_rate != inspection.sampling_rate_hz:
-                        comparison["differences"].append(
-                            f"Studio configured {expected_rate} Hz, but the CNT records {inspection.sampling_rate_hz} Hz."
-                        )
-                if comparison["differences"]:
-                    comparison["status"] = "mismatch"
             report["comparison"] = comparison
             matched = comparison["status"] == "ordered_marker_match"
         json.dump(report, sys.stdout, ensure_ascii=True, indent=2)

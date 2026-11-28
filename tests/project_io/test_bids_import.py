@@ -17,6 +17,93 @@ from tests.test_brain_products_reader import _with_captrak_header, _write_bvcdf,
 BP = {"hardware_platform": "brain_products", "hardware_confirmed": True}
 
 
+@pytest.mark.parametrize("damage", ["partial_record", "missing_record", "extra_byte"])
+def test_biosemi_admission_rejects_incomplete_record_extent(tmp_path, damage):
+    source = write_bdf(tmp_path / "recorded.bdf", variant="BDF", record_onsets=("0", "1"))
+    data = source.read_bytes()
+    if damage == "extra_byte":
+        data += b"\x00"
+    else:
+        data = data[:-(3 if damage == "partial_record" else 2 * 250 * 3)]
+    source.write_bytes(data)
+    with pytest.raises(ValueError, match="record count/file size"):
+        prepare_bids_recording(source, project_root=tmp_path)
+    assert source.read_bytes() == data and not list(tmp_path.rglob("import.json"))
+
+
+def test_old_shortened_bdf_cannot_be_reused_or_reopened(tmp_path, monkeypatch):
+    from Main_App.io import bids_import
+
+    source = write_bdf(tmp_path / "incomplete.bdf", variant="BDF", record_onsets=("0", "1"))
+    source.write_bytes(source.read_bytes()[:-3])
+    with monkeypatch.context() as prior_importer:
+        prior_importer.setattr(bids_import, "validate_bdf_record_extent", lambda *args: None)
+        with pytest.warns(RuntimeWarning, match="Number of records"):
+            prior = prepare_bids_recording(source, project_root=tmp_path)
+    receipt = json.loads(prior.manifest_path.read_bytes())
+    receipt.pop("native_extent_checked")
+    prior.manifest_path.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(ValueError, match="truncated samples"):
+        prepare_bids_recording(source, project_root=tmp_path)
+    with pytest.raises(ValueError, match="truncated samples"):
+        read_bids_recording(prior)
+
+
+@pytest.mark.parametrize("damage", ["partial_frame", "declared_frames", "late_marker", "past_end_duration"])
+def test_brainvision_partial_signal_or_marker_is_not_published(tmp_path, damage):
+    source, _ = _write_bvcdf(tmp_path)
+    signal = tmp_path / "signal.eeg"
+    markers = tmp_path / "events.vmrk"
+    if damage == "partial_frame":
+        signal.write_bytes(signal.read_bytes()[:-1])
+    elif damage == "declared_frames":
+        source.write_bytes(source.read_bytes().replace(b"NumberOfChannels=2", b"NumberOfChannels=2\nDataPoints=11"))
+    else:
+        row = b"Mk5=Stimulus,S 55,12,1,0\n" if damage == "late_marker" else b"Mk5=Stimulus,S 55,10,3,0\n"
+        with markers.open("ab") as file:
+            file.write(row)
+    before = {member: member.read_bytes() for member in (source, signal, markers)}
+    with pytest.raises(ValueError, match="complete sample frames|extends outside the recording"):
+        prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    assert all(member.read_bytes() == data for member, data in before.items())
+    assert not list(tmp_path.rglob("import.json"))
+
+
+def test_ascii_brainvision_checks_markers_against_reader_sample_count(tmp_path):
+    source, _ = _write_bvcdf(tmp_path)
+    source.write_bytes(source.read_bytes().replace(b"DataFormat=BINARY", b"DataFormat=ASCII").replace(
+        b"Binary Infos", b"ASCII Infos").replace(b"BinaryFormat=INT_16", b"DecimalSymbol=.\nSkipLines=0\nSkipColumns=0"))
+    (tmp_path / "signal.eeg").write_bytes(b"0\t1\n" * 10)
+    good = prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    assert good.header_path.exists()
+    with (tmp_path / "events.vmrk").open("ab") as file:
+        file.write(b"Mk5=Stimulus,S 55,12,1,0\n")
+    with pytest.warns(RuntimeWarning, match="Omitted"), pytest.raises(ValueError, match="outside the recording"):
+        prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    assert list(tmp_path.rglob("import.json")) == [good.manifest_path]
+
+
+@pytest.mark.parametrize("late_marker", [True, False])
+def test_older_brainvision_imports_require_intact_grid_at_reuse(tmp_path, monkeypatch, late_marker):
+    from Main_App.io import brain_products_files
+
+    source, _ = _write_bvcdf(tmp_path)
+    if late_marker:
+        with (tmp_path / "events.vmrk").open("ab") as file:
+            file.write(b"Mk5=Stimulus,S 55,12,1,0\n")
+    with monkeypatch.context() as prior_importer:
+        prior_importer.setattr(brain_products_files, "_validate_bvcdf_extent", lambda *args: None)
+        prior = prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    receipt = json.loads(prior.manifest_path.read_bytes())
+    receipt.pop("native_extent_checked")
+    prior.manifest_path.write_text(json.dumps(receipt), encoding="utf-8")
+    if late_marker:
+        with pytest.raises(ValueError, match="outside the recording"):
+            prepare_bids_recording(source, project_root=tmp_path, settings=BP)
+    else:
+        assert prepare_bids_recording(source, project_root=tmp_path, settings=BP).reused
+
+
 @pytest.mark.parametrize("writer", [_write_bvcdf, _write_bvrf])
 def test_studio_bound_brainvision_admission_checks_every_member_hash(tmp_path, writer):
     from Main_App.io.bids_loader import read_project_bids_raw

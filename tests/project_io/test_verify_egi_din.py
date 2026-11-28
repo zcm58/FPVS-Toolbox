@@ -10,6 +10,7 @@ from tests.fixtures.egi_mff import write_mff_fixture
 
 @pytest.mark.parametrize("change", [
     "match", "missing", "extra", "unmapped", "order", "send_error", "disabled", "bad_timestamp",
+    "within_sample_reverse", "wrong_metadata", "later_run",
 ])
 def test_compare_studio_run_with_mff(tmp_path, capsys, change):
     mff = tmp_path / "sample.mff"
@@ -20,6 +21,12 @@ def test_compare_studio_run_with_mff(tmp_path, capsys, change):
         events.append(("STRT", 100_000_000))
     if change == "order":
         events[0], events[1] = ("ODDB", 0), ("STRT", 25_000_000)
+    if change == "within_sample_reverse":
+        events[1] = ("ODDB", 25_123_456)
+    if change == "wrong_metadata":
+        (tmp_path / "runtime_metadata.json").write_text(json.dumps({
+            "recording": {"effective_backend": "ant_mylab_ttl", "ant_sampling_rate_hz": 512},
+        }), encoding="utf-8")
     write_mff_fixture(mff, events)
     track, = mff.glob("Events_*.xml")
     plan = [
@@ -35,7 +42,8 @@ def test_compare_studio_run_with_mff(tmp_path, capsys, change):
         ))
         writer.writeheader()
         for i, entry in enumerate(plan):
-            writer.writerow(dict(entry, trigger_index=i, time_s="nan" if change == "bad_timestamp" else 1.5 + i * 0.2,
+            writer.writerow(dict(entry, trigger_index=i + (147 if change == "later_run" else 0),
+                                 time_s="nan" if change == "bad_timestamp" else 1.5 + i * 0.2,
                                  status="error" if change == "send_error" else "sent",
                                  backend_name="null" if change == "disabled" else "egi_din"))
     args = [str(mff), "--track", track.name, "--studio-run", str(tmp_path), "--map", "STRT=7"]
@@ -44,15 +52,19 @@ def test_compare_studio_run_with_mff(tmp_path, capsys, change):
     if change == "bad_timestamp":
         assert main(args) == 2
         return
-    assert main(args) == int(change != "match")
+    matched = change in ("match", "later_run")
+    assert main(args) == int(not matched)
     report = json.loads(capsys.readouterr().out)
     assert report["comparison"]["condition_name"] == "Faces"
     assert report["comparison"]["roles_by_code"] == {"7": "condition_start", "55": "oddball_onset"}
     assert [event["source_code"] for event in report["events"]] == [code for code, _ in events]
-    if change == "match":
+    if matched:
         assert report["comparison"]["status"] == "ordered_marker_match"
         assert [event["sample"] for event in report["events"]] == [0, 25, 25]
         aligned = report["comparison"]["aligned_markers"]
+        assert [row["studio_trigger_index"] for row in aligned] == (
+            [147, 148, 149] if change == "later_run" else [0, 1, 2]
+        )
         assert [row["frame_index"] for row in aligned] == [0, 12, 24]
         assert [row["mff_minus_studio_elapsed_ms"] for row in aligned] == pytest.approx([0, -175, -375])
     else:

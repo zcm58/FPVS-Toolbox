@@ -3,7 +3,37 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
+
+
+def bdf_change_identity(path: Path, info: os.stat_result) -> dict[str, int]:
+    """Identify replaced/changed BDFs in roster review without reading signal samples."""
+    identity = {"device": info.st_dev, "inode": info.st_ino, "ctime_ns": info.st_ctime_ns}
+    if os.name != "nt":
+        return identity
+    # Python's Windows st_ctime_ns is the creation time. FileBasicInfo also
+    # exposes the last metadata/content change, even when mtime is preserved.
+    from contextlib import closing
+
+    import ntsecuritycon
+    import pywintypes
+    import win32con
+    import win32file
+    import winerror
+
+    sharing = win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE | win32con.FILE_SHARE_DELETE
+    try:
+        handle = win32file.CreateFile(str(path), ntsecuritycon.FILE_READ_ATTRIBUTES, sharing, None,
+                                     win32con.OPEN_EXISTING, win32con.FILE_ATTRIBUTE_NORMAL, None)
+        with closing(handle):
+            change = win32file.GetFileInformationByHandleEx(handle, win32file.FileBasicInfo)["ChangeTime"]
+            identity["windows_change_ms"] = round(change.timestamp() * 1000)
+    except pywintypes.error as exc:
+        if exc.winerror not in {winerror.ERROR_INVALID_FUNCTION, winerror.ERROR_INVALID_PARAMETER,
+                                winerror.ERROR_NOT_SUPPORTED}:
+            raise OSError(f"Cannot read BDF file identity for {path.name}: {exc}") from exc
+    return identity
 
 
 def recording_source_files(path: str | Path) -> tuple[Path, ...]:

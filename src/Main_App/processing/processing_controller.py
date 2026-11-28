@@ -566,6 +566,11 @@ def raw_file_info_for_path(project: "Project", file_path: Path) -> RawFileInfo:
         stat = selected_path.stat()
         if [stat.st_size, stat.st_mtime_ns] != row["file_identity"]:
             raise ValueError(f"Recording {selected_path.name} changed after review. Review the study handoff again.")
+        if selected_path.suffix.lower() == ".bdf":
+            from Main_App.io.recording_sources import bdf_change_identity
+
+            if row.get("bdf_change_identity") != bdf_change_identity(selected_path, stat):
+                raise ValueError(f"Confirm the current BDF {selected_path.name} by reviewing the Studio handoff again.")
         return _recording_info_for_source_path(recording_context, recording_context.source(recording.source_id), selected_path)
     if recording_context.is_repeated_session:
         source = _recording_source_for_path(recording_context, selected_path)

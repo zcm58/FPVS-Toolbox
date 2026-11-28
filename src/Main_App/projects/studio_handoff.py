@@ -74,6 +74,16 @@ STUDIO_RECORDER_PLATFORMS = {
     "brainproducts_triggerbox": "brain_products", "brainproducts_parallel": "brain_products",
     "unicorn_udp": "unicorn",
 }
+STUDIO_MARKER_DIAGNOSTICS = {
+    "ant_mylab_ttl": (
+        "To verify ANT wired TTL markers, open the original eego .cnt with the source diagnostic. "
+        "Run python -m Main_App.io.verify_ant_ttl --help in the Toolbox source environment."
+    ),
+    "egi_din": (
+        "EGI wired DIN supports marker verification only. To inspect the saved Net Station .mff, "
+        "run python -m Main_App.io.verify_egi_din --help in the Toolbox source environment."
+    ),
+}
 _STUDIO_MONTAGES = {
     "biosemi": ("biosemi64",), "biosemi_active_three": ("recorded", BIOSEMI128_MONTAGE),
     "brain_products": ("recorded", ACTICAP_GACS_64, ACTICAP_GACS_128), "unicorn": ("unicorn8",),
@@ -116,17 +126,22 @@ def _explicit_recording(recording: Mapping[str, Any], backend_key: str) -> Studi
     platform = STUDIO_RECORDER_PLATFORMS[backend]
     if montage not in _STUDIO_MONTAGES[platform]:
         raise ValueError(f"Unsupported Studio electrode montage {montage!r} for recorder {backend!r}.")
-    profile = recording.get("acquisition_profile")
-    if profile is not None:
-        profile = _object(profile, "acquisition_profile")
-        if profile.get("montage_id") != montage:
-            raise ValueError("Studio electrode montage conflicts with its acquisition profile.")
-        if platform == "unicorn" and profile.get("source_to_canonical") is not None:
-            from Main_App.io.acquisition_profiles import UNICORN_FACTORY_RECORDED_LABEL_MAP
+    selection = StudioRecordingSelection(platform, montage)
+    _validate_selected_profile(selection, recording.get("acquisition_profile"))
+    return selection
 
-            if profile["source_to_canonical"] != UNICORN_FACTORY_RECORDED_LABEL_MAP:
-                raise ValueError("Studio channel mapping conflicts with the Unicorn factory montage.")
-    return StudioRecordingSelection(platform, montage)
+
+def _validate_selected_profile(selection: StudioRecordingSelection, value: Any) -> None:
+    if value is None:
+        return
+    profile = _object(value, "acquisition_profile")
+    if profile.get("montage_id") != selection.montage:
+        raise ValueError("Studio electrode montage conflicts with its acquisition profile.")
+    if selection.platform == "unicorn" and profile.get("source_to_canonical") is not None:
+        from Main_App.io.acquisition_profiles import UNICORN_FACTORY_RECORDED_LABEL_MAP
+
+        if profile["source_to_canonical"] != UNICORN_FACTORY_RECORDED_LABEL_MAP:
+            raise ValueError("Studio channel mapping conflicts with the Unicorn factory montage.")
 
 
 def studio_recording_selection(
@@ -138,15 +153,23 @@ def studio_recording_selection(
     recording = _object(setup.get("recording") or {}, "recording")
     declared = _explicit_recording(recording, "recording_backend")
     summary_profile = _object(setup.get("toolbox") or {}, "toolbox").get("acquisition_profile")
-    if declared and summary_profile is not None:
-        if _object(summary_profile, "toolbox.acquisition_profile").get("montage_id") != declared.montage:
-            raise ValueError("Studio electrode montage conflicts with its Toolbox acquisition profile.")
+    if declared:
+        _validate_selected_profile(declared, summary_profile)
+    if (recording.get("acquisition_profile") is not None and summary_profile is not None
+            and recording["acquisition_profile"] != summary_profile):
+        raise ValueError("Studio acquisition profiles conflict between recording and toolbox declarations.")
     if as_run is not None:
         # Study exports capture the recorder per visit. The referenced setup
         # often contains only the protocol and has no recording declaration.
+        selected = _recording_backend(as_run.get("selected_backend"), "recording.selected_backend")
+        if "schema_version" in as_run and (type(as_run["schema_version"]) is not int or as_run["schema_version"] != 1):
+            raise ValueError("Unsupported Studio recording snapshot revision.")
+        if ("effective_backend" in as_run or "schema_version" in as_run) and (
+            as_run.get("effective_backend") != _EFFECTIVE_BACKENDS[selected]
+        ):
+            raise ValueError("Studio selected and effective recording backends conflict in this visit.")
         captured = _explicit_recording(as_run, "selected_backend")
-        if ((declared and declared != captured) or
-                (captured and recording and recording["recording_backend"] != as_run["selected_backend"])):
+        if ((declared and declared != captured) or (recording and recording["recording_backend"] != selected)):
             raise ValueError("Studio recorder or electrode montage conflicts between the captured setup and recording.")
         return captured
     if setup.get("kind") != "completed_session":
@@ -550,16 +573,8 @@ def _validate_acquisition_identity(
 
 def _recording_backend(value: Any, field: str) -> str:
     backend = _text(value, field)
-    if backend == "ant_mylab_ttl":
-        raise ValueError(
-            "To verify ANT wired TTL markers, open the original eego .cnt with the source diagnostic. "
-            "Run python -m Main_App.io.verify_ant_ttl --help in the Toolbox source environment."
-        )
-    if backend == "egi_din":
-        raise ValueError(
-            "EGI wired DIN supports marker verification only. To inspect the saved Net Station .mff, "
-            "run python -m Main_App.io.verify_egi_din --help in the Toolbox source environment."
-        )
+    if backend in STUDIO_MARKER_DIAGNOSTICS:
+        raise ValueError(STUDIO_MARKER_DIAGNOSTICS[backend])
     if backend not in _EFFECTIVE_BACKENDS:
         raise ValueError(f"Unsupported Studio recording backend in {field}: {backend!r}.")
     return backend

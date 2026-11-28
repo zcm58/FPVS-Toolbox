@@ -27,6 +27,7 @@ impedance checks, stay in the report. Unclassified events prevent an ordered
 match. Repetitions and events on the same sample remain distinct. When Studio's
 `runtime_metadata.json` is present, the comparison also checks the effective
 output and configured Recorder rate against the CNT sample grid.
+Both marker diagnostics use the [Studio run evidence checks](#studio-run-evidence-for-marker-comparisons).
 
 The saved regression example in `tests/fixtures/ant_cnt/studio_playback/`
 pairs unedited run files from Studio's simulated 60 Hz playback with an RF64 CNT
@@ -91,6 +92,25 @@ positive value means that more time elapsed in the recording. This comparison
 cannot detect a constant delay. Measure display latency against a separately
 identifiable photodiode trace on the same recording clock.
 
+### Studio run evidence for marker comparisons
+
+Keep each condition's detailed run folder together. The ANT and EGI diagnostics
+compare its compiled schedule with the per-run CSV, require one initial
+condition marker and increasing compiled frame indices, and preserve ties on
+the recording clock. Each run's CSV retains its session-wide trigger indices.
+Later runs can start above zero. Indices must remain contiguous, and each
+matched row reports its original `studio_trigger_index`. Decreasing recorded
+onsets, including reversals within one MFF sample, prevent an ordered match.
+
+When `run_summary.json` is present, Toolbox cross-checks its project and run
+identity, condition, and logged attempts (including callback times) with
+`runspec.json` and `trigger_log.csv`. Available runtime metadata must identify
+the same output. The summary and the separate metadata file must agree on
+recording settings when both supply them. `run_summary_checked` reports whether
+the summary was available. Preserve the acquisition log linking the source
+recording to the visit. Two recordings with the same marker schedule can both
+match in order.
+
 ## Shared import boundary
 
 `Main_App.io.bids_import` owns preparation and verified reuse of one recording's
@@ -145,6 +165,13 @@ With the project's import retention off, the same admission and verification
 use a temporary dataset in private process scratch storage. It is removed once
 the preloaded samples are available or the lazy read context closes. Existing
 project imports remain available when retention is enabled again.
+
+BioSemi BDF admission checks that the payload contains complete 24-bit data
+records and matches the header's declared count when supplied. For BVCDF binary
+data, Toolbox checks sample-frame boundaries and any declared sample count.
+Both binary and ASCII BVCDF markers must fit the signal, including their
+duration, before Toolbox accepts or reuses the import. An incomplete copy must
+be replaced from the recorder.
 
 BioSemi BDF data is copied byte-for-byte. BVCDF signal bytes are copied unchanged while
 header/marker companion links are relocated. Brain Products companions must

@@ -31,6 +31,7 @@ import mne
 import numpy as np
 
 from Main_App.io.atomic_write import rename_with_retry
+from Main_App.io.bdf_format import validate_bdf_record_extent
 from Main_App.io.recording_sources import recording_content_identity, source_hashes_by_file
 from Main_App.io.safe_file import regular_file_info
 
@@ -407,6 +408,14 @@ def prepare_bids_recording(
             _contained(existing, root)
             manifest = _valid_publication(existing, identity, key, mobile=hardware == "unicorn")
             if manifest is not None:
+                if manifest.get("native_extent_checked") is not True:
+                    # Older verified hashes may describe a signal or marker table
+                    # that the native reader previously shortened during import.
+                    if source.suffix.lower() == ".vhdr":
+                        from Main_App.io.brain_products_files import source_files
+                        source_files(source, known_samples=manifest["recording"]["n_times"])
+                    elif source.suffix.lower() == ".bdf" and hardware != "unicorn":
+                        validate_bdf_record_extent(source, identity[0]["size"])
                 return _descriptor(existing, manifest, conversion_seconds=0.0,
                                    identity_seconds=perf_counter() - started, reused=True, studio_source_hashes=studio_source_hashes)
     identity_seconds = perf_counter() - started
@@ -440,6 +449,7 @@ def prepare_bids_recording(
                 from Main_App.io.mobile_eeg import open_mobile_import_source
                 raw = owners.enter_context(open_mobile_import_source(source, settings, project_root=root))
             elif suffix == ".bdf":
+                validate_bdf_record_extent(source, identity[0]["size"])
                 raw = mne.io.read_raw_bdf(source, preload=False, stim_channel=str(settings.get("stim_channel") or "Status"), verbose=False)
                 owners.callback(raw.close)
             else:
@@ -472,6 +482,8 @@ def prepare_bids_recording(
         manifest = {"version": IMPORT_VERSION, "key": key, "source_identity": list(identity),
                     "subject": subject, "extension": extension, "representation": representation,
                     "outputs": outputs, "recording": metadata}
+        if suffix in {".bdf", ".vhdr"}:
+            manifest["native_extent_checked"] = True
         _json(staging / "import.json", manifest)
         rename_with_retry(staging, final)
     elapsed = perf_counter() - conversion_started - verification_seconds
@@ -516,10 +528,15 @@ def read_bids_recording(recording: BidsRecording, *, preload: bool | str = False
             from Main_App.io.brain_products_files import source_files
 
             header = recording.header_path
-            if source_files(header, native_paths=True) != (header, header.with_suffix(".eeg"), header.with_suffix(".vmrk")):
+            previous_samples = None if manifest.get("native_extent_checked") is True else metadata["n_times"]
+            if source_files(header, native_paths=True, known_samples=previous_samples) != (
+                header, header.with_suffix(".eeg"), header.with_suffix(".vmrk"),
+            ):
                 raise ValueError("Imported BrainVision companions differ from the verified BIDS inventory.")
         elif "mobile_import" in metadata or "canonical_events" in metadata:
             params["stim_channel"] = [name for name, kind in zip(metadata["channel_names"], metadata["channel_types"], strict=True) if kind == "stim"] or None
+        elif manifest.get("native_extent_checked") is not True:
+            validate_bdf_record_extent(recording.header_path, recording.header_path.stat().st_size)
         raw = read_raw_bids(recording.bids_path, extra_params=params, verbose=False)
     owns_preload = False
     try:
